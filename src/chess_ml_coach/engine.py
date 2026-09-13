@@ -17,6 +17,8 @@ import pandas as pd
 from .config import MoveQualityThresholds, Settings
 
 MATE_CP = 100_000
+MATE_REANALYZE_THRESHOLD = 50_000
+SCORING_VERSION = 2
 ProgressCallback = Callable[[dict[str, object]], None]
 ANALYSIS_COLUMNS = [
     "game_id",
@@ -27,7 +29,9 @@ ANALYSIS_COLUMNS = [
     "cpl",
     "quality",
     "engine_config_hash",
+    "scoring_version",
 ]
+LEGACY_ANALYSIS_COLUMNS = [column for column in ANALYSIS_COLUMNS if column != "scoring_version"]
 
 
 class EngineConfigurationError(RuntimeError):
@@ -53,13 +57,8 @@ class StockfishAdapter:
 
 def normalize_score(score: chess.engine.PovScore, user_color: chess.Color) -> int:
     value = score.pov(user_color)
-    if value.is_mate():
-        mate = value.mate()
-        if mate is None:
-            return 0
-        return MATE_CP if mate > 0 else -MATE_CP
-    cp = value.score()
-    return int(cp or 0)
+    converted = value.score(mate_score=MATE_CP)
+    return int(converted or 0)
 
 
 def centipawn_loss(best_eval_cp: int, played_eval_cp: int) -> int:
@@ -76,8 +75,8 @@ def quality_label(cpl: int, thresholds: MoveQualityThresholds) -> str:
     return "good"
 
 
-def _config_hash(settings: Settings) -> str:
-    payload = {
+def _config_payload(settings: Settings, *, scoring_version: int | None) -> dict[str, object]:
+    payload: dict[str, object] = {
         "depth": settings.stockfish_depth,
         "thresholds": {
             "inaccuracy": settings.thresholds.inaccuracy,
@@ -85,7 +84,21 @@ def _config_hash(settings: Settings) -> str:
             "blunder": settings.thresholds.blunder,
         },
     }
+    if scoring_version is not None:
+        payload["scoring_version"] = scoring_version
+    return payload
+
+
+def _hash_payload(payload: dict[str, object]) -> str:
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _config_hash(settings: Settings) -> str:
+    return _hash_payload(_config_payload(settings, scoring_version=SCORING_VERSION))
+
+
+def _legacy_config_hash(settings: Settings) -> str:
+    return _hash_payload(_config_payload(settings, scoring_version=None))
 
 
 def _resolve_stockfish(path: str | None) -> str:
@@ -162,6 +175,92 @@ def _emit_progress(
     )
 
 
+def _is_mate_sentinel(value: object) -> bool:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return bool(pd.notna(number) and abs(float(number)) >= MATE_REANALYZE_THRESHOLD)
+
+
+def _legacy_row_is_safe(row: pd.Series, user_move: pd.Series | None) -> bool:
+    if any(
+        _is_mate_sentinel(row.get(column))
+        for column in ("eval_before_cp", "eval_after_cp", "cpl")
+    ):
+        return False
+    if user_move is None:
+        return True
+    actual_uci = user_move.get("uci")
+    best_uci = row.get("best_move_uci")
+    if (
+        actual_uci is not None
+        and best_uci is not None
+        and str(actual_uci) == str(best_uci)
+        and float(row.get("cpl", 0) or 0) > 0
+    ):
+        return False
+    fen_after = user_move.get("fen_after")
+    if fen_after is not None and not pd.isna(fen_after):
+        try:
+            if chess.Board(str(fen_after)).is_checkmate():
+                return False
+        except ValueError:
+            pass
+    return True
+
+
+def _load_reusable_analysis(
+    moves: pd.DataFrame,
+    settings: Settings,
+    output_path: Path,
+    *,
+    force: bool,
+) -> pd.DataFrame:
+    if force or not output_path.exists():
+        return pd.DataFrame(columns=ANALYSIS_COLUMNS)
+
+    raw = pd.read_parquet(output_path)
+    missing = set(LEGACY_ANALYSIS_COLUMNS) - set(raw.columns)
+    if missing:
+        raise EngineConfigurationError(
+            f"Invalid analysis artifact {output_path}: missing {sorted(missing)}"
+        )
+    if "scoring_version" not in raw.columns:
+        raw["scoring_version"] = 1
+
+    config_hash = _config_hash(settings)
+    legacy_hash = _legacy_config_hash(settings)
+    current = raw[
+        (raw["engine_config_hash"] == config_hash)
+        & (pd.to_numeric(raw["scoring_version"], errors="coerce") == SCORING_VERSION)
+    ].copy()
+
+    legacy = raw[raw["engine_config_hash"] == legacy_hash].copy()
+    if not legacy.empty:
+        user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)].copy()
+        move_lookup = {
+            (str(row.game_id), int(row.ply)): pd.Series(row._asdict())
+            for row in user_moves.itertuples(index=False)
+        }
+        safe_indices = []
+        for index, row in legacy.iterrows():
+            key = (str(row["game_id"]), int(row["ply"]))
+            if _legacy_row_is_safe(row, move_lookup.get(key)):
+                safe_indices.append(index)
+        migrated = legacy.loc[safe_indices].copy()
+        if not migrated.empty:
+            migrated["engine_config_hash"] = config_hash
+            migrated["scoring_version"] = SCORING_VERSION
+            current = pd.concat([current, migrated], ignore_index=True)
+
+    if current.empty:
+        return pd.DataFrame(columns=ANALYSIS_COLUMNS)
+    return (
+        current[ANALYSIS_COLUMNS]
+        .drop_duplicates(["game_id", "ply"], keep="last")
+        .sort_values(["game_id", "ply"])
+        .reset_index(drop=True)
+    )
+
+
 def _analyze_user_moves_unlocked(
     moves: pd.DataFrame,
     settings: Settings,
@@ -172,16 +271,7 @@ def _analyze_user_moves_unlocked(
     progress: ProgressCallback | None,
 ) -> pd.DataFrame:
     config_hash = _config_hash(settings)
-    if force or not output_path.exists():
-        existing = pd.DataFrame(columns=ANALYSIS_COLUMNS)
-    else:
-        existing = pd.read_parquet(output_path)
-        missing = set(ANALYSIS_COLUMNS) - set(existing.columns)
-        if missing:
-            raise EngineConfigurationError(
-                f"Invalid analysis artifact {output_path}: missing {sorted(missing)}"
-            )
-        existing = existing[existing["engine_config_hash"] == config_hash].copy()
+    existing = _load_reusable_analysis(moves, settings, output_path, force=force)
 
     keys = {
         (str(row.game_id), int(row.ply), str(row.engine_config_hash))
@@ -231,9 +321,19 @@ def _analyze_user_moves_unlocked(
                     adapter = StockfishAdapter(resolved_stockfish)
             before_eval = normalize_score(before_info["score"], user_color)
             after_eval = normalize_score(after_info["score"], user_color)
-            cpl = centipawn_loss(before_eval, after_eval)
             pv = before_info.get("pv") or []
             best_move = pv[0].uci() if pv else None
+            actual_move = getattr(row, "uci", None)
+            delivered_mate = after_board.is_checkmate()
+            is_best_move = (
+                best_move is not None
+                and actual_move is not None
+                and best_move == str(actual_move)
+            )
+            if is_best_move or delivered_mate:
+                cpl = 0
+            else:
+                cpl = centipawn_loss(before_eval, after_eval)
             rows.append(
                 {
                     "game_id": str(row.game_id),
@@ -244,6 +344,7 @@ def _analyze_user_moves_unlocked(
                     "cpl": cpl,
                     "quality": quality_label(cpl, settings.thresholds),
                     "engine_config_hash": config_hash,
+                    "scoring_version": SCORING_VERSION,
                 }
             )
             keys.add(key)

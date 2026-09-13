@@ -40,6 +40,7 @@ EXCLUDED_FEATURES = {
     "significant_mistake",
     "mistake_cpl_threshold",
     "engine_config_hash",
+    "scoring_version",
     "source_url",
     "white",
     "black",
