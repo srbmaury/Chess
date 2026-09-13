@@ -35,11 +35,18 @@ def _doubled_pawns(files: list[int]) -> int:
 
 def _isolated_pawns(files: list[int]) -> int:
     occupied = set(files)
-    return sum(1 for file_index in files if file_index - 1 not in occupied and file_index + 1 not in occupied)
+    return sum(
+        1
+        for file_index in files
+        if file_index - 1 not in occupied and file_index + 1 not in occupied
+    )
 
 
 def _material(board: chess.Board, color: chess.Color) -> int:
-    return sum(len(board.pieces(piece_type, color)) * value for piece_type, value in PIECE_VALUES.items())
+    return sum(
+        len(board.pieces(piece_type, color)) * value
+        for piece_type, value in PIECE_VALUES.items()
+    )
 
 
 def _non_pawn_non_king_material(board: chess.Board) -> int:
@@ -79,8 +86,10 @@ def extract_position_features(fen: str) -> dict[str, int]:
         "material_balance_white": white_material - black_material,
         "total_non_king_material": white_material + black_material,
         "non_pawn_non_king_material": _non_pawn_non_king_material(board),
-        "white_castling_rights": int(board.has_kingside_castling_rights(chess.WHITE)) + int(board.has_queenside_castling_rights(chess.WHITE)),
-        "black_castling_rights": int(board.has_kingside_castling_rights(chess.BLACK)) + int(board.has_queenside_castling_rights(chess.BLACK)),
+        "white_castling_rights": int(board.has_kingside_castling_rights(chess.WHITE))
+        + int(board.has_queenside_castling_rights(chess.WHITE)),
+        "black_castling_rights": int(board.has_kingside_castling_rights(chess.BLACK))
+        + int(board.has_queenside_castling_rights(chess.BLACK)),
         "white_queen_present": int(bool(board.pieces(chess.QUEEN, chess.WHITE))),
         "black_queen_present": int(bool(board.pieces(chess.QUEEN, chess.BLACK))),
         "white_pawn_islands": _pawn_islands(white_files),
@@ -100,7 +109,9 @@ def classify_phase(fen: str, fullmove_number: int) -> str:
     board = chess.Board(fen)
     if fullmove_number <= 12:
         return "opening"
-    queens = len(board.pieces(chess.QUEEN, chess.WHITE)) + len(board.pieces(chess.QUEEN, chess.BLACK))
+    queens = len(board.pieces(chess.QUEEN, chess.WHITE)) + len(
+        board.pieces(chess.QUEEN, chess.BLACK)
+    )
     if queens == 0 and _non_pawn_non_king_material(board) <= 16:
         return "endgame"
     return "middlegame"
@@ -110,8 +121,10 @@ def time_control_category(value: object) -> str:
     if value is None or pd.isna(value):
         return "unknown"
     text = str(value).strip()
-    if not text or "/" in text:
+    if not text:
         return "unknown"
+    if "/" in text:
+        return "daily"
     try:
         seconds = float(text.split("+", 1)[0])
     except ValueError:
@@ -134,7 +147,12 @@ def build_feature_dataset(
     user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)].copy()
     if analysis.duplicated(["game_id", "ply"]).any():
         raise ValueError("Engine analysis contains duplicate game_id/ply rows")
-    frame = user_moves.merge(analysis, on=["game_id", "ply"], how="inner", validate="one_to_one")
+    frame = user_moves.merge(
+        analysis,
+        on=["game_id", "ply"],
+        how="inner",
+        validate="one_to_one",
+    )
     frame = frame.merge(games, on="game_id", how="left", validate="many_to_one")
 
     board_features = pd.DataFrame(
@@ -157,27 +175,39 @@ def build_feature_dataset(
     )
     frame["rating_difference"] = frame["user_rating"] - frame["opponent_rating"]
     frame["material_balance"] = frame.apply(
-        lambda row: row.material_balance_white if row.color == "white" else -row.material_balance_white,
+        lambda row: row.material_balance_white
+        if row.color == "white"
+        else -row.material_balance_white,
         axis=1,
     )
     frame["king_ring_attacks"] = frame.apply(
-        lambda row: row.white_king_ring_attacks if row.color == "white" else row.black_king_ring_attacks,
+        lambda row: row.white_king_ring_attacks
+        if row.color == "white"
+        else row.black_king_ring_attacks,
         axis=1,
     )
     frame["own_castling_rights"] = frame.apply(
-        lambda row: row.white_castling_rights if row.color == "white" else row.black_castling_rights,
+        lambda row: row.white_castling_rights
+        if row.color == "white"
+        else row.black_castling_rights,
         axis=1,
     )
     frame["own_doubled_pawns"] = frame.apply(
-        lambda row: row.white_doubled_pawns if row.color == "white" else row.black_doubled_pawns,
+        lambda row: row.white_doubled_pawns
+        if row.color == "white"
+        else row.black_doubled_pawns,
         axis=1,
     )
     frame["own_isolated_pawns"] = frame.apply(
-        lambda row: row.white_isolated_pawns if row.color == "white" else row.black_isolated_pawns,
+        lambda row: row.white_isolated_pawns
+        if row.color == "white"
+        else row.black_isolated_pawns,
         axis=1,
     )
     frame["own_pawn_islands"] = frame.apply(
-        lambda row: row.white_pawn_islands if row.color == "white" else row.black_pawn_islands,
+        lambda row: row.white_pawn_islands
+        if row.color == "white"
+        else row.black_pawn_islands,
         axis=1,
     )
     frame["engine_eval_before_cp"] = frame["eval_before_cp"]
@@ -185,7 +215,10 @@ def build_feature_dataset(
     frame["mistake_cpl_threshold"] = thresholds.mistake
     frame["eco"] = frame["eco"].fillna("unknown")
     frame["opening"] = frame["opening"].fillna("unknown")
-    return frame.sort_values(["game_date", "game_id", "ply"], na_position="last").reset_index(drop=True)
+    return frame.sort_values(
+        ["game_date", "game_id", "ply"],
+        na_position="last",
+    ).reset_index(drop=True)
 
 
 def write_feature_dataset(frame: pd.DataFrame, path: Path) -> Path:

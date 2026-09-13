@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -23,6 +24,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 TARGET = "significant_mistake"
+ProgressCallback = Callable[[dict[str, object]], None]
 EXCLUDED_FEATURES = {
     "game_id",
     "game_date",
@@ -56,6 +58,11 @@ class TrainingResult:
     metrics: dict[str, float | None]
     train_rows: int
     test_rows: int
+
+
+def _emit(progress: ProgressCallback | None, stage: str, message: str) -> None:
+    if progress is not None:
+        progress({"stage": stage, "message": message})
 
 
 def chronological_game_split(
@@ -130,8 +137,12 @@ def train_model(
     model_dir: Path,
     *,
     test_fraction: float = 0.2,
+    progress: ProgressCallback | None = None,
 ) -> TrainingResult:
+    _emit(progress, "split", "Splitting games chronologically")
     train, test = chronological_game_split(df, test_fraction=test_fraction)
+
+    _emit(progress, "prepare", "Preparing model features")
     feature_columns = _feature_columns(df)
     x_train = train[feature_columns].copy()
     x_test = test[feature_columns].copy()
@@ -168,7 +179,11 @@ def train_model(
         verbosity=-1,
     )
     pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", model)])
+
+    _emit(progress, "train", "Training LightGBM")
     pipeline.fit(x_train, y_train)
+
+    _emit(progress, "evaluate", "Evaluating holdout games")
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -178,6 +193,7 @@ def train_model(
         probabilities = pipeline.predict_proba(x_test)[:, 1]
     metrics = _safe_metrics(y_test, probabilities)
 
+    _emit(progress, "save", "Saving model and metadata")
     model_dir.mkdir(parents=True, exist_ok=True)
     model_path = model_dir / "mistake_model.joblib"
     metadata_path = model_dir / "mistake_model.metadata.json"
@@ -217,6 +233,8 @@ def train_model(
         "feature_importance": feature_importance,
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    _emit(progress, "done", "Training complete")
     return TrainingResult(
         model_path=model_path,
         metadata_path=metadata_path,

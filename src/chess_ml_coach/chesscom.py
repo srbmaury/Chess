@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -12,6 +13,7 @@ import httpx
 from .config import Settings
 
 API = "https://api.chess.com/pub"
+ProgressCallback = Callable[[dict[str, object]], None]
 
 
 class ChessComError(RuntimeError):
@@ -93,7 +95,12 @@ def _load_games(path: Path) -> list[dict]:
     return data
 
 
-def _persist_sync(raw_dir: Path, username: str, games: list[dict], archives_done: list[str]) -> tuple[Path, Path]:
+def _persist_sync(
+    raw_dir: Path,
+    username: str,
+    games: list[dict],
+    archives_done: list[str],
+) -> tuple[Path, Path]:
     games_path = raw_dir / "games.json"
     pgn_path = raw_dir / f"{username}_all_games.pgn"
     manifest_path = raw_dir / "sync_manifest.json"
@@ -112,21 +119,43 @@ def _persist_sync(raw_dir: Path, username: str, games: list[dict], archives_done
     return pgn_path, manifest_path
 
 
-def sync_games(client: ChessComClient, settings: Settings) -> SyncResult:
+def sync_games(
+    client: ChessComClient,
+    settings: Settings,
+    *,
+    progress: ProgressCallback | None = None,
+) -> SyncResult:
     raw_dir = settings.data_dir / "raw"
     games_path = raw_dir / "games.json"
     existing_games = _load_games(games_path)
     existing_count = len(existing_games)
     games = list(existing_games)
     archives_done: list[str] = []
+    archives = client.archive_urls(settings.username)
 
-    for archive_url in client.archive_urls(settings.username):
+    for current, archive_url in enumerate(archives, start=1):
         archive_games = client.games_for_archive(archive_url)
-        if archive_games is None:
-            continue
-        games = merge_games(games, archive_games)
-        archives_done.append(archive_url)
-        pgn_path, manifest_path = _persist_sync(raw_dir, settings.username, games, archives_done)
+        skipped = archive_games is None
+        if archive_games is not None:
+            games = merge_games(games, archive_games)
+            archives_done.append(archive_url)
+            pgn_path, manifest_path = _persist_sync(
+                raw_dir,
+                settings.username,
+                games,
+                archives_done,
+            )
+        if progress is not None:
+            progress(
+                {
+                    "stage": "sync",
+                    "current": current,
+                    "total": len(archives),
+                    "archive": archive_url,
+                    "game_count": len(games),
+                    "skipped": skipped,
+                }
+            )
 
     if not archives_done:
         pgn_path, manifest_path = _persist_sync(raw_dir, settings.username, games, archives_done)

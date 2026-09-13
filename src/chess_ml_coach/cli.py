@@ -11,6 +11,7 @@ from .config import Settings, get_settings
 
 app = typer.Typer(no_args_is_help=True)
 T = TypeVar("T")
+ProgressCallback = Callable[[dict[str, object]], None]
 
 
 def _execute(action: Callable[[], T]) -> T:
@@ -23,12 +24,41 @@ def _execute(action: Callable[[], T]) -> T:
         raise typer.Exit(code=1) from exc
 
 
-def _run_sync(settings: Settings) -> dict:
+def _print_sync_progress(event: dict[str, object]) -> None:
+    archive = str(event.get("archive", ""))
+    parts = archive.rstrip("/").split("/")
+    month = "/".join(parts[-2:]) if len(parts) >= 2 else archive
+    status = " skipped (unavailable)" if event.get("skipped") else ""
+    typer.echo(
+        f"[sync] {event.get('current')}/{event.get('total')} {month} • "
+        f"{event.get('game_count')} games{status}"
+    )
+
+
+def _print_analyze_progress(event: dict[str, object]) -> None:
+    completed = int(event.get("completed", 0))
+    total = int(event.get("total", 0))
+    reused = int(event.get("reused", 0))
+    analyzed = int(event.get("analyzed", 0))
+    detail = ""
+    if event.get("game_id") is not None and event.get("ply") is not None:
+        detail = f" • ply {event['ply']}"
+    typer.echo(
+        f"\r[analyze] {completed}/{total} • {reused} reused • {analyzed} new{detail}",
+        nl=False,
+    )
+
+
+def _print_train_progress(event: dict[str, object]) -> None:
+    typer.echo(f"[train] {event.get('message', event.get('stage', 'working'))}")
+
+
+def _run_sync(settings: Settings, progress: ProgressCallback | None = None) -> dict:
     from .chesscom import ChessComClient, sync_games
 
     client = ChessComClient()
     try:
-        result = sync_games(client, settings)
+        result = sync_games(client, settings, progress=progress)
     finally:
         client.http.close()
     return {
@@ -38,7 +68,7 @@ def _run_sync(settings: Settings) -> dict:
     }
 
 
-def _run_analyze(settings: Settings) -> dict:
+def _run_analyze(settings: Settings, progress: ProgressCallback | None = None) -> dict:
     from .engine import analyze_user_moves
     from .pgn import parse_pgn_file, write_normalized
 
@@ -48,7 +78,7 @@ def _run_analyze(settings: Settings) -> dict:
     games, moves = parse_pgn_file(raw_pgn, settings.username)
     write_normalized(games, moves, settings.data_dir / "processed")
     output = settings.data_dir / "engine" / "analysis.parquet"
-    analysis = analyze_user_moves(moves, settings, output)
+    analysis = analyze_user_moves(moves, settings, output, progress=progress)
     return {"rows": len(analysis), "output": output}
 
 
@@ -72,7 +102,7 @@ def _run_features(settings: Settings) -> dict:
     return {"rows": len(frame), "output": output}
 
 
-def _run_train(settings: Settings) -> dict:
+def _run_train(settings: Settings, progress: ProgressCallback | None = None) -> dict:
     import pandas as pd
 
     from .train import train_model
@@ -81,7 +111,7 @@ def _run_train(settings: Settings) -> dict:
     if not features_path.exists():
         raise FileNotFoundError(f"Missing {features_path}. Run `chess-coach features` first.")
     frame = pd.read_parquet(features_path)
-    result = train_model(frame, settings.model_dir)
+    result = train_model(frame, settings.model_dir, progress=progress)
     return {
         "model_path": result.model_path,
         "metadata_path": result.metadata_path,
@@ -121,7 +151,7 @@ def sync(
 ) -> None:
     """Download and deduplicate Chess.com games."""
     settings = _execute(lambda: get_settings(username, data_dir=data_dir))
-    result = _execute(lambda: _run_sync(settings))
+    result = _execute(lambda: _run_sync(settings, progress=_print_sync_progress))
     typer.echo(
         f"Synced {result['total']} games ({result['downloaded']} new games) -> {result['pgn_path']}"
     )
@@ -149,7 +179,8 @@ def analyze(
             blunder_cpl=blunder_cpl,
         )
     )
-    result = _execute(lambda: _run_analyze(settings))
+    result = _execute(lambda: _run_analyze(settings, progress=_print_analyze_progress))
+    typer.echo()
     typer.echo(f"Analyzed {result['rows']} user moves -> {result['output']}")
 
 
@@ -185,7 +216,7 @@ def train(
     settings = _execute(
         lambda: get_settings(username, data_dir=data_dir, model_dir=model_dir)
     )
-    result = _execute(lambda: _run_train(settings))
+    result = _execute(lambda: _run_train(settings, progress=_print_train_progress))
     typer.echo(f"Saved model -> {result['model_path']}")
     typer.echo(json.dumps(result["metrics"], indent=2, sort_keys=True))
 

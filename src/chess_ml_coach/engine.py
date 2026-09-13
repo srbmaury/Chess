@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
-from contextlib import suppress
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
@@ -14,6 +17,7 @@ import pandas as pd
 from .config import MoveQualityThresholds, Settings
 
 MATE_CP = 100_000
+ProgressCallback = Callable[[dict[str, object]], None]
 ANALYSIS_COLUMNS = [
     "game_id",
     "ply",
@@ -98,20 +102,74 @@ def _resolve_stockfish(path: str | None) -> str:
     raise EngineConfigurationError(f"Stockfish executable not found: {path}")
 
 
+@contextmanager
+def _analysis_lock(output_path: Path) -> Iterator[None]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = output_path.with_suffix(".lock")
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise EngineConfigurationError(
+            f"Analysis is already running for {output_path}. "
+            f"If no analyzer is running, remove stale lock file {lock_path}."
+        ) from exc
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()))
+        yield
+    finally:
+        lock_path.unlink(missing_ok=True)
+
+
 def _write_analysis(frame: pd.DataFrame, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = output_path.with_suffix(".tmp.parquet")
-    frame.sort_values(["game_id", "ply"]).to_parquet(temp_path, index=False)
-    temp_path.replace(output_path)
+    with tempfile.NamedTemporaryFile(
+        dir=output_path.parent,
+        prefix=f".{output_path.stem}.",
+        suffix=".parquet",
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+    try:
+        frame.sort_values(["game_id", "ply"]).to_parquet(temp_path, index=False)
+        temp_path.replace(output_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
-def analyze_user_moves(
+def _emit_progress(
+    progress: ProgressCallback | None,
+    *,
+    completed: int,
+    total: int,
+    reused: int,
+    analyzed: int,
+    game_id: str | None = None,
+    ply: int | None = None,
+) -> None:
+    if progress is None:
+        return
+    progress(
+        {
+            "stage": "analyze",
+            "completed": completed,
+            "total": total,
+            "reused": reused,
+            "analyzed": analyzed,
+            "game_id": game_id,
+            "ply": ply,
+        }
+    )
+
+
+def _analyze_user_moves_unlocked(
     moves: pd.DataFrame,
     settings: Settings,
     output_path: Path,
     *,
-    adapter: EngineAdapter | None = None,
-    force: bool = False,
+    adapter: EngineAdapter | None,
+    force: bool,
+    progress: ProgressCallback | None,
 ) -> pd.DataFrame:
     config_hash = _config_hash(settings)
     if force or not output_path.exists():
@@ -129,6 +187,21 @@ def analyze_user_moves(
         (str(row.game_id), int(row.ply), str(row.engine_config_hash))
         for row in existing.itertuples(index=False)
     }
+    user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)].copy()
+    total = len(user_moves)
+    reused = sum(
+        1
+        for row in user_moves.itertuples(index=False)
+        if (str(row.game_id), int(row.ply), config_hash) in keys
+    )
+    analyzed = 0
+    _emit_progress(
+        progress,
+        completed=reused,
+        total=total,
+        reused=reused,
+        analyzed=analyzed,
+    )
 
     owns_adapter = adapter is None
     resolved_stockfish: str | None = None
@@ -138,7 +211,7 @@ def analyze_user_moves(
 
     rows = existing.to_dict("records")
     try:
-        for row in moves[moves["is_user_move"].fillna(False).astype(bool)].itertuples(index=False):
+        for row in user_moves.itertuples(index=False):
             key = (str(row.game_id), int(row.ply), config_hash)
             if key in keys:
                 continue
@@ -174,9 +247,43 @@ def analyze_user_moves(
                 }
             )
             keys.add(key)
+            analyzed += 1
             _write_analysis(pd.DataFrame(rows, columns=ANALYSIS_COLUMNS), output_path)
+            _emit_progress(
+                progress,
+                completed=reused + analyzed,
+                total=total,
+                reused=reused,
+                analyzed=analyzed,
+                game_id=str(row.game_id),
+                ply=int(row.ply),
+            )
     finally:
         if owns_adapter:
             adapter.close()
 
-    return pd.DataFrame(rows, columns=ANALYSIS_COLUMNS).sort_values(["game_id", "ply"]).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows, columns=ANALYSIS_COLUMNS)
+        .sort_values(["game_id", "ply"])
+        .reset_index(drop=True)
+    )
+
+
+def analyze_user_moves(
+    moves: pd.DataFrame,
+    settings: Settings,
+    output_path: Path,
+    *,
+    adapter: EngineAdapter | None = None,
+    force: bool = False,
+    progress: ProgressCallback | None = None,
+) -> pd.DataFrame:
+    with _analysis_lock(output_path):
+        return _analyze_user_moves_unlocked(
+            moves,
+            settings,
+            output_path,
+            adapter=adapter,
+            force=force,
+            progress=progress,
+        )

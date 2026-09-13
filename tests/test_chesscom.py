@@ -92,3 +92,24 @@ def test_sync_is_idempotent(tmp_path: Path):
     text = first.pgn_path.read_text()
     assert text.count("https://www.chess.com/game/live/1") == 1
     assert text.count("https://www.chess.com/game/live/2") == 1
+
+
+def test_sync_reports_archive_progress(tmp_path: Path):
+    archives = json.loads((FIXTURES / "archives.json").read_text())
+    month = json.loads((FIXTURES / "month.json").read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/archives"):
+            return httpx.Response(200, json=archives)
+        return httpx.Response(200, json=month)
+
+    events: list[dict] = []
+    client = ChessComClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
+
+    sync_games(client, settings, progress=events.append)
+
+    assert [event["current"] for event in events] == [1, 2]
+    assert all(event["total"] == 2 for event in events)
+    assert events[-1]["game_count"] == 2
+    assert events[-1]["archive"].endswith("2026/09")

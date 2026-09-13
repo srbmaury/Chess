@@ -70,3 +70,13 @@ def test_train_model_saves_pipeline_and_metrics(tmp_path: Path):
     assert result.metadata_path.exists()
     assert set(result.metrics) >= {"roc_auc", "pr_auc", "log_loss", "brier_score"}
     assert all(value is None or np.isfinite(value) for value in result.metrics.values())
+
+
+def test_train_model_reports_human_readable_stages(tmp_path: Path):
+    events: list[dict] = []
+
+    train_model(_training_frame(), tmp_path, progress=events.append)
+
+    stages = [event["stage"] for event in events]
+    assert stages == ["split", "prepare", "train", "evaluate", "save", "done"]
+    assert events[-1]["message"] == "Training complete"

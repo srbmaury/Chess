@@ -4,6 +4,7 @@ import logging
 from hashlib import sha256
 from pathlib import Path
 from typing import TextIO
+from urllib.parse import unquote, urlparse
 
 import chess
 import chess.pgn
@@ -70,6 +71,19 @@ def _game_date(headers: chess.pgn.Headers) -> pd.Timestamp:
     return pd.to_datetime(raw.replace(".", "-"), errors="coerce")
 
 
+def _opening_name(headers: chess.pgn.Headers) -> str | None:
+    explicit = headers.get("Opening")
+    if explicit:
+        return str(explicit)
+    eco_url = headers.get("ECOUrl")
+    if not eco_url:
+        return None
+    slug = Path(urlparse(str(eco_url)).path.rstrip("/")).name
+    if not slug:
+        return None
+    return unquote(slug).replace("-", " ")
+
+
 def _fallback_game_id(game: chess.pgn.Game) -> str:
     board = game.board()
     moves: list[str] = []
@@ -129,7 +143,7 @@ def parse_pgn_file(path: Path, username: str) -> tuple[pd.DataFrame, pd.DataFram
                     "time_control": headers.get("TimeControl"),
                     "rated": _parse_bool(headers.get("Rated")),
                     "eco": headers.get("ECO"),
-                    "opening": headers.get("Opening"),
+                    "opening": _opening_name(headers),
                     "source_url": headers.get("Link") or headers.get("Site"),
                 }
             )
@@ -169,7 +183,11 @@ def _validate_columns(frame: pd.DataFrame, required: list[str], path: Path) -> N
         raise ArtifactSchemaError(f"Invalid artifact schema at {path}: missing {', '.join(missing)}")
 
 
-def write_normalized(games: pd.DataFrame, moves: pd.DataFrame, processed_dir: Path) -> tuple[Path, Path]:
+def write_normalized(
+    games: pd.DataFrame,
+    moves: pd.DataFrame,
+    processed_dir: Path,
+) -> tuple[Path, Path]:
     processed_dir.mkdir(parents=True, exist_ok=True)
     games_path = processed_dir / "games.parquet"
     moves_path = processed_dir / "moves.parquet"

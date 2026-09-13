@@ -33,3 +33,25 @@ def test_game_metadata_is_normalized():
     assert white_game.black_rating == 1510
     assert white_game.eco == "C20"
     assert str(white_game.game_date.date()) == "2026-09-01"
+
+
+def test_opening_name_falls_back_to_chesscom_eco_url(tmp_path: Path):
+    pgn = tmp_path / "game.pgn"
+    pgn.write_text(
+        """[Event \"Live Chess\"]
+[Site \"https://www.chess.com/game/live/99\"]
+[Date \"2026.09.03\"]
+[White \"srbmaury\"]
+[Black \"opponent\"]
+[Result \"1-0\"]
+[ECO \"D00\"]
+[ECOUrl \"https://www.chess.com/openings/Queens-Pawn-Opening\"]
+
+1. d4 d5 1-0
+""",
+        encoding="utf-8",
+    )
+
+    games, _ = parse_pgn_file(pgn, "srbmaury")
+
+    assert games.iloc[0].opening == "Queens Pawn Opening"

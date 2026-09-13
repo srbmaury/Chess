@@ -3,9 +3,11 @@ from pathlib import Path
 import chess
 import chess.engine
 import pandas as pd
+import pytest
 
 from chess_ml_coach.config import MoveQualityThresholds, Settings
 from chess_ml_coach.engine import (
+    EngineConfigurationError,
     analyze_user_moves,
     centipawn_loss,
     normalize_score,
@@ -55,20 +57,27 @@ class FakeEngine:
         pass
 
 
-def test_analysis_is_resumable_for_same_engine_config(tmp_path: Path):
+def _single_user_move() -> pd.DataFrame:
     start = chess.Board()
     move = chess.Move.from_uci("e2e4")
-    after = start.copy(); after.push(move)
-    moves = pd.DataFrame([
-        {
-            "game_id": "g1",
-            "ply": 1,
-            "color": "white",
-            "fen_before": start.fen(),
-            "fen_after": after.fen(),
-            "is_user_move": True,
-        }
-    ])
+    after = start.copy()
+    after.push(move)
+    return pd.DataFrame(
+        [
+            {
+                "game_id": "g1",
+                "ply": 1,
+                "color": "white",
+                "fen_before": start.fen(),
+                "fen_after": after.fen(),
+                "is_user_move": True,
+            }
+        ]
+    )
+
+
+def test_analysis_is_resumable_for_same_engine_config(tmp_path: Path):
+    moves = _single_user_move()
     output = tmp_path / "analysis.parquet"
     settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
 
@@ -84,15 +93,18 @@ def test_analysis_is_resumable_for_same_engine_config(tmp_path: Path):
 
 
 def test_changed_engine_config_replaces_stale_analysis(tmp_path: Path):
-    start = chess.Board()
-    move = chess.Move.from_uci("e2e4")
-    after = start.copy(); after.push(move)
-    moves = pd.DataFrame([
-        {"game_id": "g1", "ply": 1, "color": "white", "fen_before": start.fen(), "fen_after": after.fen(), "is_user_move": True}
-    ])
+    moves = _single_user_move()
     output = tmp_path / "analysis.parquet"
-    first_settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models", stockfish_depth=14)
-    second_settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models", stockfish_depth=16)
+    first_settings = Settings(
+        data_dir=tmp_path / "data",
+        model_dir=tmp_path / "models",
+        stockfish_depth=14,
+    )
+    second_settings = Settings(
+        data_dir=tmp_path / "data",
+        model_dir=tmp_path / "models",
+        stockfish_depth=16,
+    )
     first = analyze_user_moves(moves, first_settings, output, adapter=FakeEngine())
     second_engine = FakeEngine()
     second = analyze_user_moves(moves, second_settings, output, adapter=second_engine)
@@ -100,3 +112,30 @@ def test_changed_engine_config_replaces_stale_analysis(tmp_path: Path):
     assert len(second) == 1
     assert second_engine.calls == 2
     assert first.iloc[0].engine_config_hash != second.iloc[0].engine_config_hash
+
+
+def test_analysis_reports_reused_and_completed_progress(tmp_path: Path):
+    moves = _single_user_move()
+    output = tmp_path / "analysis.parquet"
+    settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
+    analyze_user_moves(moves, settings, output, adapter=FakeEngine())
+
+    events: list[dict] = []
+    analyze_user_moves(moves, settings, output, adapter=FakeEngine(), progress=events.append)
+
+    assert events[0]["stage"] == "analyze"
+    assert events[0]["total"] == 1
+    assert events[0]["completed"] == 1
+    assert events[0]["reused"] == 1
+    assert events[0]["analyzed"] == 0
+
+
+def test_analysis_refuses_second_writer_when_lock_exists(tmp_path: Path):
+    moves = _single_user_move()
+    output = tmp_path / "analysis.parquet"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.with_suffix(".lock").write_text("12345", encoding="utf-8")
+    settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
+
+    with pytest.raises(EngineConfigurationError, match="already running"):
+        analyze_user_moves(moves, settings, output, adapter=FakeEngine())

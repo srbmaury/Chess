@@ -1,7 +1,11 @@
 import pandas as pd
 
 from chess_ml_coach.config import MoveQualityThresholds
-from chess_ml_coach.features import build_feature_dataset, extract_position_features
+from chess_ml_coach.features import (
+    build_feature_dataset,
+    extract_position_features,
+    time_control_category,
+)
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -22,6 +26,10 @@ def test_pawn_structure_counts_doubled_isolated_and_islands():
     assert f["white_doubled_pawns"] == 1
     assert f["white_isolated_pawns"] == 3
     assert f["white_pawn_islands"] == 2
+
+
+def test_daily_time_control_is_not_lumped_into_unknown():
+    assert time_control_category("1/86400") == "daily"
 
 
 def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
