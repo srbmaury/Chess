@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import pytest
-
-from chess_ml_coach.config import Settings
 from chess_ml_coach.profiles import (
     ProfileManager,
     ProfileMigrationConflictError,
     canonicalize_username,
 )
+
+from chess_ml_coach.config import Settings
 
 
 def _root(tmp_path: Path) -> Settings:
