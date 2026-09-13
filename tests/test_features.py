@@ -1,0 +1,57 @@
+import pandas as pd
+
+from chess_ml_coach.config import MoveQualityThresholds
+from chess_ml_coach.features import build_feature_dataset, extract_position_features
+
+START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+
+def test_start_position_features_are_stable():
+    f = extract_position_features(START_FEN)
+    assert f["legal_move_count"] == 20
+    assert f["total_non_king_material"] == 78
+    assert f["white_castling_rights"] == 2
+    assert f["black_castling_rights"] == 2
+    assert f["white_queen_present"] == 1
+    assert f["black_queen_present"] == 1
+    assert f["in_check"] == 0
+
+
+def test_pawn_structure_counts_doubled_isolated_and_islands():
+    f = extract_position_features("8/8/8/8/8/P7/P1P5/4K2k w - - 0 1")
+    assert f["white_doubled_pawns"] == 1
+    assert f["white_isolated_pawns"] == 3
+    assert f["white_pawn_islands"] == 2
+
+
+def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
+    games = pd.DataFrame([
+        {
+            "game_id": "g1",
+            "game_date": pd.Timestamp("2026-09-01"),
+            "white": "srbmaury",
+            "black": "opponent",
+            "white_rating": 1500,
+            "black_rating": 1510,
+            "result": "1-0",
+            "time_control": "600+5",
+            "rated": True,
+            "eco": "C20",
+            "opening": "King Pawn",
+            "source_url": "url",
+        }
+    ])
+    moves = pd.DataFrame([
+        {"game_id": "g1", "ply": 1, "fullmove_number": 1, "color": "white", "fen_before": START_FEN, "fen_after": START_FEN, "san": "e4", "uci": "e2e4", "is_user_move": True, "clock_seconds": 600.0},
+        {"game_id": "g1", "ply": 2, "fullmove_number": 1, "color": "black", "fen_before": START_FEN, "fen_after": START_FEN, "san": "e5", "uci": "e7e5", "is_user_move": False, "clock_seconds": 600.0},
+        {"game_id": "g1", "ply": 3, "fullmove_number": 2, "color": "white", "fen_before": START_FEN, "fen_after": START_FEN, "san": "Nf3", "uci": "g1f3", "is_user_move": True, "clock_seconds": 595.0},
+    ])
+    analysis = pd.DataFrame([
+        {"game_id": "g1", "ply": 1, "best_move_uci": "e2e4", "eval_before_cp": 10, "eval_after_cp": -89, "cpl": 99, "quality": "inaccuracy", "engine_config_hash": "x"},
+        {"game_id": "g1", "ply": 3, "best_move_uci": "g1f3", "eval_before_cp": 20, "eval_after_cp": -80, "cpl": 100, "quality": "mistake", "engine_config_hash": "x"},
+    ])
+    frame = build_feature_dataset(games, moves, analysis, MoveQualityThresholds())
+    assert frame.ply.tolist() == [1, 3]
+    assert frame.significant_mistake.tolist() == [0, 1]
+    assert frame.time_control_category.tolist() == ["rapid", "rapid"]
+    assert frame.rating_difference.tolist() == [-10, -10]
