@@ -42,6 +42,37 @@ def test_client_parses_archives_and_month_fixture():
     assert len(client.games_for_archive(urls[0])) == 2
 
 
+def test_missing_month_archive_is_non_fatal():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "Data not found"})
+
+    client = ChessComClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.games_for_archive("https://api.chess.com/pub/player/srbmaury/games/2025/05") is None
+
+
+def test_sync_skips_missing_archive_and_continues(tmp_path: Path):
+    month = json.loads((FIXTURES / "month.json").read_text())
+    missing_url = "https://api.chess.com/pub/player/srbmaury/games/2025/05"
+    good_url = "https://api.chess.com/pub/player/srbmaury/games/2025/06"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/archives"):
+            return httpx.Response(200, json={"archives": [missing_url, good_url]})
+        if request.url.path.endswith("/2025/05"):
+            return httpx.Response(404, json={"message": "Data not found"})
+        return httpx.Response(200, json=month)
+
+    client = ChessComClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
+
+    result = sync_games(client, settings)
+
+    assert result.downloaded == 2
+    assert result.total == 2
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["archives_completed"] == [good_url]
+
+
 def test_sync_is_idempotent(tmp_path: Path):
     archives = json.loads((FIXTURES / "archives.json").read_text())
     month = json.loads((FIXTURES / "month.json").read_text())
