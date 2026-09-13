@@ -1,5 +1,3 @@
-# ruff: noqa: I001
-
 import json
 import threading
 import time
