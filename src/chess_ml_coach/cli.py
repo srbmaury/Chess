@@ -309,7 +309,7 @@ def ui(
     model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
-    no_open: Annotated[bool, typer.Option("--no-open", is_flag=True)] = False,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open")] = True,
 ) -> None:
     """Start the local Chess ML Coach web application."""
     import threading
@@ -325,7 +325,7 @@ def ui(
     web_app = _execute(lambda: create_served_app(settings))
     url = f"http://{host}:{port}"
     typer.echo(f"Chess ML Coach UI -> {url}")
-    if not no_open:
+    if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
     uvicorn.run(web_app, host=host, port=port)
 
