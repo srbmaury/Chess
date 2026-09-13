@@ -1,0 +1,25 @@
+[Event "Synthetic White"]
+[Site "https://www.chess.com/game/live/42"]
+[Date "2026.09.01"]
+[White "srbmaury"]
+[Black "opponent"]
+[WhiteElo "1500"]
+[BlackElo "1510"]
+[Result "1-0"]
+[TimeControl "600+5"]
+[ECO "C20"]
+
+1. e4 {[%clk 0:10:00]} e5 {[%clk 0:10:00]} 2. Nf3 {[%clk 0:09:57]} Nc6 1-0
+
+[Event "Synthetic Black"]
+[Site "https://www.chess.com/game/live/43"]
+[Date "2026.09.02"]
+[White "opponent2"]
+[Black "srbmaury"]
+[WhiteElo "1520"]
+[BlackElo "1505"]
+[Result "0-1"]
+[TimeControl "300"]
+[ECO "D00"]
+
+1. d4 d5 2. c4 e6 0-1
