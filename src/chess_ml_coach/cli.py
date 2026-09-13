@@ -7,21 +7,22 @@ from typing import Annotated, TypeVar
 
 import typer
 
+from . import services
 from .config import get_settings
-from .services import (
-    answer_to_uci as _answer_to_uci,
-    run_analyze as _run_analyze,
-    run_features as _run_features,
-    run_puzzles as _run_puzzles,
-    run_report as _run_report,
-    run_sync as _run_sync,
-    run_train as _run_train,
-    training_db_path as _training_db_path,
-)
 
 app = typer.Typer(no_args_is_help=True)
 T = TypeVar("T")
 ProgressCallback = Callable[[dict[str, object]], None]
+
+# Keep these aliases as stable monkeypatch/backward-compatibility seams for the CLI tests.
+_run_sync = services.run_sync
+_run_analyze = services.run_analyze
+_run_features = services.run_features
+_run_train = services.run_train
+_run_report = services.run_report
+_run_puzzles = services.run_puzzles
+_training_db_path = services.training_db_path
+_answer_to_uci = services.answer_to_uci
 
 
 def _execute(action: Callable[[], T]) -> T:
