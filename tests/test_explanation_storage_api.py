@@ -85,3 +85,43 @@ def test_explanation_is_hidden_until_puzzle_has_been_attempted(tmp_path: Path):
 
     assert response.status_code == 409
     assert "attempt" in response.json()["detail"].lower()
+
+
+def test_explanation_endpoint_returns_cached_grounded_payload_after_attempt(tmp_path: Path):
+    training_store = _store(tmp_path)
+    training_store.record_review(
+        "p1",
+        answer="e2e4",
+        correct=False,
+        now=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    puzzle = training_store.get_puzzle("p1")
+    assert puzzle is not None
+
+    module = import_module("chess_ml_coach.explanations")
+    cache = module.ExplanationStore(training_store.path)
+    cache.save(
+        "p1",
+        fingerprint=module.puzzle_fingerprint(puzzle),
+        depth=14,
+        payload={
+            "idea": "Forcing check",
+            "why": "This move gives check and keeps the initiative.",
+            "best_line": ["d4", "d5", "Nc3"],
+            "why_your_move_was_worse": "e4 lost 2.50 pawns of evaluation.",
+            "engine_grounded": True,
+            "depth": 14,
+        },
+        now=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    response = TestClient(create_app(_settings(tmp_path))).get(
+        "/api/practice/p1/explanation"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["idea"] == "Forcing check"
+    assert body["best_line"] == ["d4", "d5", "Nc3"]
+    assert body["engine_grounded"] is True
+    assert body["cached"] is True
