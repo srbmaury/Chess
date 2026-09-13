@@ -72,7 +72,7 @@ class ProfileManager:
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Cannot read profile registry: {self.registry_path}") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("profiles", {}), dict):
-            raise RuntimeError(f"Invalid profile registry: {self.registry_path}")
+            raise TypeError(f"Invalid profile registry: {self.registry_path}")
         payload.setdefault("version", _REGISTRY_VERSION)
         payload.setdefault("active_username", None)
         payload.setdefault("profiles", {})
