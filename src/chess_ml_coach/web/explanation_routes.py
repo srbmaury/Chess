@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..explanations import ExplanationStore, PuzzleExplanationService
 from ..services import training_db_path
 from ..training import TrainingStore
 
@@ -22,4 +23,4 @@ def puzzle_explanation(request: Request, puzzle_id: str) -> dict[str, object]:
             status_code=409,
             detail="Attempt this puzzle before requesting its explanation.",
         )
-    raise HTTPException(status_code=501, detail="Puzzle explanation is not implemented yet")
+    return PuzzleExplanationService(settings, ExplanationStore(db_path)).explain(puzzle)
