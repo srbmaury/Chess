@@ -99,3 +99,33 @@ def test_engine_failure_returns_uncached_board_fallback(tmp_path: Path):
     assert first["best_line"] == ["Qxh7+"]
     assert "Stockfish" in str(first["why"])
     assert second["cached"] is False
+
+
+def test_engine_disagreement_is_not_cached_or_used_as_the_stored_move_explanation(
+    tmp_path: Path,
+):
+    puzzle, cache = _puzzle(tmp_path)
+    calls = 0
+
+    def analyse(_board: chess.Board, _depth: int) -> dict:
+        nonlocal calls
+        calls += 1
+        return {
+            "score": chess.engine.PovScore(chess.engine.Cp(80), chess.WHITE),
+            "pv": [chess.Move.from_uci("h5h3")],
+        }
+
+    service = explanations.PuzzleExplanationService(
+        Settings(stockfish_depth=14), cache, analyse=analyse
+    )
+
+    first = service.explain(puzzle)
+    second = service.explain(puzzle)
+
+    assert calls == 2
+    assert first["engine_grounded"] is False
+    assert first["cached"] is False
+    assert first["best_line"] == ["Qxh7+"]
+    assert "refresh" in str(first["why"]).lower()
+    assert "Qh3" in str(first["why"])
+    assert second["cached"] is False
