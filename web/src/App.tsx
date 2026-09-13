@@ -8,6 +8,7 @@ type Training = { total_puzzles: number; due_puzzles: number; reviewed_puzzles: 
 type Dashboard = { analyzed_moves: number; training: Training; artifacts: Record<string, { exists: boolean; updated_at?: string | null; rows?: number | null }> }
 type PracticePuzzle = { puzzle_id: string; fen: string; orientation: string; game: string; move: string; opening: string; eco: string; phase: string; motif: string; difficulty: number; source_url?: string | null }
 type Attempt = { correct: boolean; best_move_san: string; best_move_uci: string; your_game_move: string; evaluation_loss_pawns: number; next_interval_days: number; next_review_at: string; source_url?: string | null }
+type Explanation = { idea: string; why: string; best_line: string[]; why_your_move_was_worse: string; engine_grounded: boolean; depth: number; cached: boolean }
 type PuzzleItem = PracticePuzzle & { your_move_san: string; your_move_uci: string; best_move_san: string; best_move_uci: string; evaluation_loss_pawns: number; quality: string; attempts: number; correct_attempts: number; accuracy: number | null; consecutive_correct: number; next_review_at: string; mastered: boolean }
 type GroupRow = { label: string; puzzles: number; attempts: number; correct: number; accuracy: number | null }
 type Progress = Training & { by_motif: GroupRow[]; by_opening: GroupRow[]; daily_reviews: Array<{ date: string; reviews: number; correct: number; accuracy: number }> }
@@ -31,6 +32,7 @@ const api = {
   dashboard: () => request<Dashboard>('/api/dashboard'),
   nextPuzzle: () => request<{ puzzle: PracticePuzzle | null }>('/api/practice/next'),
   attempt: (id: string, move_uci: string) => request<Attempt>(`/api/practice/${id}/attempt`, { method: 'POST', body: JSON.stringify({ move_uci }) }),
+  explanation: (id: string) => request<Explanation>(`/api/practice/${id}/explanation`),
   skip: (id: string) => request<{ skipped: boolean }>(`/api/practice/${id}/skip`, { method: 'POST' }),
   progress: () => request<Progress>('/api/progress'),
   puzzles: (query = '') => request<{ items: PuzzleItem[]; total: number; limit: number; offset: number }>(`/api/puzzles${query}`),
@@ -61,9 +63,12 @@ function DashboardPage() {
 function PracticePage() {
   const [puzzle, setPuzzle] = useState<PracticePuzzle | null | undefined>(undefined)
   const [feedback, setFeedback] = useState<Attempt | null>(null)
+  const [explanation, setExplanation] = useState<Explanation | null>(null)
+  const [explaining, setExplaining] = useState(false)
+  const [explanationError, setExplanationError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const load = useCallback(() => { setFeedback(null); setSubmitting(false); setError(''); setPuzzle(undefined); api.nextPuzzle().then((r) => setPuzzle(r.puzzle)).catch((x: Error) => setError(x.message)) }, [])
+  const load = useCallback(() => { setFeedback(null); setExplanation(null); setExplaining(false); setExplanationError(''); setSubmitting(false); setError(''); setPuzzle(undefined); api.nextPuzzle().then((r) => setPuzzle(r.puzzle)).catch((x: Error) => setError(x.message)) }, [])
   useEffect(load, [load])
 
   async function submitMove(moveUci: string) {
@@ -74,6 +79,19 @@ function PracticePage() {
     } catch (x) {
       setError((x as Error).message)
       setSubmitting(false)
+    }
+  }
+
+  async function explainBestMove() {
+    if (!puzzle || !feedback || explaining || explanation) return
+    setExplaining(true)
+    setExplanationError('')
+    try {
+      setExplanation(await api.explanation(puzzle.puzzle_id))
+    } catch (x) {
+      setExplanationError((x as Error).message)
+    } finally {
+      setExplaining(false)
     }
   }
 
@@ -97,7 +115,7 @@ function PracticePage() {
   if (error) return <section><Heading kicker="PRACTICE" title="Puzzle trainer" copy="Solve positions from your own games." /><ErrorBox message={error} /><button onClick={load}>Retry</button></section>
   if (puzzle === undefined) return <p className="muted">Loading next puzzle…</p>
   if (!puzzle) return <section className="empty"><h1>You're caught up</h1><p>No puzzles are due right now.</p></section>
-  return <section><Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} /><div className="practice"><div className="board"><Chessboard options={{ position: puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div><div className="panel practice-info"><h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>{!feedback ? <><p className="muted">{submitting ? 'Checking your move…' : 'Find the strongest move. The engine answer stays hidden until you commit.'}</p><button className="ghost" disabled={submitting} onClick={skip}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button onClick={load}>Next puzzle</button></div>}</div></div></section>
+  return <section><Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} /><div className="practice"><div className="board"><Chessboard options={{ position: puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div><div className="panel practice-info"><h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>{!feedback ? <><p className="muted">{submitting ? 'Checking your move…' : 'Find the strongest move. The engine answer stays hidden until you commit.'}</p><button className="ghost" disabled={submitting} onClick={skip}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={explainBestMove}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <div className="explanation"><p className="kicker">{explanation.engine_grounded ? `STOCKFISH · DEPTH ${explanation.depth}` : 'BOARD-ONLY FALLBACK'}</p><h3>{explanation.idea}</h3><p>{explanation.why}</p><p><strong>Best line:</strong> {explanation.best_line.join(' ')}</p><p><strong>Why your move was worse:</strong> {explanation.why_your_move_was_worse}</p></div>}<button onClick={load}>Next puzzle</button></div>}</div></div></section>
 }
 
 function MistakesPage() {
