@@ -7,7 +7,6 @@ from chess_ml_coach.cli import app
 from chess_ml_coach.config import Settings
 from chess_ml_coach.web.serve import create_served_app
 
-
 runner = CliRunner()
 
 
