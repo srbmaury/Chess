@@ -183,6 +183,34 @@ def _why_original_move_was_worse(puzzle: StoredPuzzle) -> str:
     )
 
 
+def _engine_disagreement_fallback(
+    board: chess.Board,
+    puzzle: StoredPuzzle,
+    *,
+    depth: int,
+    preferred_move: chess.Move,
+    board_reason: str,
+    why_worse: str,
+) -> dict[str, object]:
+    if preferred_move in board.legal_moves:
+        preferred = board.san(preferred_move)
+    else:
+        preferred = preferred_move.uci()
+    return {
+        "idea": "Analysis changed",
+        "why": (
+            f"Stockfish at depth {depth} now prefers {preferred} rather than the stored "
+            f"best move {puzzle.best_move_san}. Refresh Analyze → Features → Puzzles "
+            f"before relying on an engine-grounded explanation. Board-only note: {board_reason}"
+        ),
+        "best_line": [puzzle.best_move_san],
+        "why_your_move_was_worse": why_worse,
+        "engine_grounded": False,
+        "depth": depth,
+        "cached": False,
+    }
+
+
 class PuzzleExplanationService:
     def __init__(
         self,
@@ -217,8 +245,17 @@ class PuzzleExplanationService:
         why_worse = _why_original_move_was_worse(puzzle)
         try:
             info = self._analyse(board.copy(stack=False), depth)
-            pv = info.get("pv") or []
-            best_line = _san_line(board, list(pv))
+            pv = list(info.get("pv") or [])
+            if pv and pv[0].uci() != puzzle.best_move_uci:
+                return _engine_disagreement_fallback(
+                    board,
+                    puzzle,
+                    depth=depth,
+                    preferred_move=pv[0],
+                    board_reason=board_reason,
+                    why_worse=why_worse,
+                )
+            best_line = _san_line(board, pv)
             if not best_line:
                 best_line = [puzzle.best_move_san]
             payload: dict[str, object] = {
