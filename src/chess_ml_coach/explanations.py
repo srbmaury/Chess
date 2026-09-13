@@ -25,13 +25,7 @@ def _iso(value: datetime | None = None) -> str:
 
 
 def puzzle_fingerprint(puzzle: StoredPuzzle) -> str:
-    raw = "|".join(
-        [
-            puzzle.fen_before,
-            puzzle.best_move_uci,
-            puzzle.your_move_uci,
-        ]
-    )
+    raw = f"{puzzle.fen_before}|{puzzle.best_move_uci}|{puzzle.your_move_uci}"
     return sha256(raw.encode()).hexdigest()[:24]
 
 
