@@ -42,6 +42,7 @@ class StoredPuzzle:
     last_reviewed_at: datetime | None
     next_review_at: datetime
     mastered: bool
+    active: bool
 
     @property
     def eval_loss_pawns(self) -> float:
@@ -152,7 +153,8 @@ class TrainingStore:
                     consecutive_correct INTEGER NOT NULL DEFAULT 0,
                     last_reviewed_at TEXT,
                     next_review_at TEXT NOT NULL,
-                    mastered INTEGER NOT NULL DEFAULT 0
+                    mastered INTEGER NOT NULL DEFAULT 0,
+                    active INTEGER NOT NULL DEFAULT 1
                 );
 
                 CREATE TABLE IF NOT EXISTS reviews (
@@ -172,6 +174,20 @@ class TrainingStore:
                     ON reviews(puzzle_id, id);
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(puzzles)")
+            }
+            if "active" not in columns:
+                connection.execute(
+                    "ALTER TABLE puzzles ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_puzzles_active_due
+                ON puzzles(active, next_review_at)
+                """
+            )
 
     def upsert_puzzles(
         self,
@@ -188,6 +204,7 @@ class TrainingStore:
                 str(row["puzzle_id"])
                 for row in connection.execute("SELECT puzzle_id FROM puzzles")
             }
+            connection.execute("UPDATE puzzles SET active = 0")
             for puzzle in puzzles:
                 if puzzle.puzzle_id in existing_ids:
                     updated += 1
@@ -201,9 +218,9 @@ class TrainingStore:
                         move_label, your_move_san, your_move_uci, best_move_san,
                         best_move_uci, cpl, quality, opening, eco, game_phase,
                         source_url, motif, difficulty, created_at, updated_at,
-                        next_review_at
+                        next_review_at, active
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     ON CONFLICT(puzzle_id) DO UPDATE SET
                         game_id = excluded.game_id,
@@ -224,7 +241,8 @@ class TrainingStore:
                         source_url = excluded.source_url,
                         motif = excluded.motif,
                         difficulty = excluded.difficulty,
-                        updated_at = excluded.updated_at
+                        updated_at = excluded.updated_at,
+                        active = 1
                     """,
                     (
                         puzzle.puzzle_id,
@@ -249,9 +267,14 @@ class TrainingStore:
                         timestamp,
                         timestamp,
                         timestamp,
+                        1,
                     ),
                 )
-            total = int(connection.execute("SELECT COUNT(*) FROM puzzles").fetchone()[0])
+            total = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM puzzles WHERE active = 1"
+                ).fetchone()[0]
+            )
         return UpsertResult(inserted=inserted, updated=updated, total=total)
 
     @staticmethod
@@ -285,6 +308,7 @@ class TrainingStore:
             last_reviewed_at=_parse_datetime(row["last_reviewed_at"]),
             next_review_at=next_review,
             mastered=bool(row["mastered"]),
+            active=bool(row["active"]),
         )
 
     def get_puzzle(self, puzzle_id: str) -> StoredPuzzle | None:
@@ -321,6 +345,8 @@ class TrainingStore:
             ).fetchone()
             if puzzle is None:
                 raise KeyError(f"Unknown puzzle: {puzzle_id}")
+            if not bool(puzzle["active"]):
+                raise ValueError(f"Puzzle is inactive: {puzzle_id}")
 
             old_streak = int(puzzle["consecutive_correct"])
             new_streak = old_streak + 1 if correct else 0
@@ -399,7 +425,7 @@ class TrainingStore:
                 """
                 SELECT *
                 FROM puzzles
-                WHERE next_review_at <= ?
+                WHERE active = 1 AND next_review_at <= ?
                 ORDER BY
                     next_review_at ASC,
                     (attempts - correct_attempts) DESC,
@@ -422,6 +448,7 @@ class TrainingStore:
                        SUM(attempts) AS attempts,
                        SUM(correct_attempts) AS correct
                 FROM puzzles
+                WHERE active = 1
                 GROUP BY {column}
                 ORDER BY attempts DESC, puzzles DESC, label ASC
                 """
@@ -451,14 +478,17 @@ class TrainingStore:
                        SUM(CASE WHEN attempts > 0 THEN 1 ELSE 0 END) AS reviewed,
                        SUM(CASE WHEN mastered = 1 THEN 1 ELSE 0 END) AS mastered
                 FROM puzzles
+                WHERE active = 1
                 """,
                 (timestamp,),
             ).fetchone()
             review_stats = connection.execute(
                 """
                 SELECT COUNT(*) AS total_reviews,
-                       SUM(correct) AS correct_reviews
+                       SUM(reviews.correct) AS correct_reviews
                 FROM reviews
+                JOIN puzzles ON puzzles.puzzle_id = reviews.puzzle_id
+                WHERE puzzles.active = 1
                 """
             ).fetchone()
 
