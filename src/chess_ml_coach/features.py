@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 
 import chess
@@ -25,7 +26,7 @@ def _pawn_islands(files: list[int]) -> int:
     unique = sorted(set(files))
     if not unique:
         return 0
-    return 1 + sum(1 for left, right in zip(unique, unique[1:]) if right != left + 1)
+    return 1 + sum(1 for left, right in pairwise(unique) if right != left + 1)
 
 
 def _doubled_pawns(files: list[int]) -> int:
@@ -130,7 +131,7 @@ def build_feature_dataset(
     analysis: pd.DataFrame,
     thresholds: MoveQualityThresholds,
 ) -> pd.DataFrame:
-    user_moves = moves[moves["is_user_move"] == True].copy()  # noqa: E712
+    user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)].copy()
     if analysis.duplicated(["game_id", "ply"]).any():
         raise ValueError("Engine analysis contains duplicate game_id/ply rows")
     frame = user_moves.merge(analysis, on=["game_id", "ply"], how="inner", validate="one_to_one")

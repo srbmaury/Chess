@@ -23,7 +23,7 @@ def test_cli_exposes_all_pipeline_commands():
 
 
 def test_sync_command_uses_default_username_and_data_dir(monkeypatch, tmp_path: Path):
-    import chess_ml_coach.cli as cli
+    from chess_ml_coach import cli
 
     seen = {}
 
@@ -40,7 +40,7 @@ def test_sync_command_uses_default_username_and_data_dir(monkeypatch, tmp_path: 
 
 
 def test_sync_command_accepts_username_override(monkeypatch):
-    import chess_ml_coach.cli as cli
+    from chess_ml_coach import cli
 
     seen = {}
 
@@ -55,7 +55,7 @@ def test_sync_command_accepts_username_override(monkeypatch):
 
 
 def test_analyze_surfaces_actionable_stockfish_error(monkeypatch):
-    import chess_ml_coach.cli as cli
+    from chess_ml_coach import cli
 
     def fake_run(settings):
         raise RuntimeError("Stockfish is not configured. Set STOCKFISH_PATH.")

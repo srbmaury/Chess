@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import suppress
 from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
@@ -137,7 +138,7 @@ def analyze_user_moves(
 
     rows = existing.to_dict("records")
     try:
-        for row in moves[moves["is_user_move"] == True].itertuples(index=False):  # noqa: E712
+        for row in moves[moves["is_user_move"].fillna(False).astype(bool)].itertuples(index=False):
             key = (str(row.game_id), int(row.ply), config_hash)
             if key in keys:
                 continue
@@ -152,10 +153,8 @@ def analyze_user_moves(
                 except chess.engine.EngineTerminatedError:
                     if not owns_adapter or attempt == 1 or resolved_stockfish is None:
                         raise
-                    try:
+                    with suppress(chess.engine.EngineTerminatedError, BrokenPipeError, OSError):
                         adapter.close()
-                    except Exception:
-                        pass
                     adapter = StockfishAdapter(resolved_stockfish)
             before_eval = normalize_score(before_info["score"], user_color)
             after_eval = normalize_score(after_info["score"], user_color)

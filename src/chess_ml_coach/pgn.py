@@ -96,7 +96,7 @@ def _iter_games(handle: TextIO):
         position = handle.tell()
         try:
             game = chess.pgn.read_game(handle)
-        except Exception as exc:  # parser errors should not kill the corpus
+        except Exception as exc:  # noqa: BLE001 - malformed third-party PGNs should not kill the corpus
             LOGGER.warning("Skipping unreadable PGN game: %s", exc)
             if handle.tell() == position:
                 handle.readline()

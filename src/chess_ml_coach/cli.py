@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Annotated, TypeVar
 
 import typer
 
@@ -115,8 +116,8 @@ def _run_report(settings: Settings) -> dict:
 
 @app.command()
 def sync(
-    username: str | None = typer.Option(None, "--username"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
 ) -> None:
     """Download and deduplicate Chess.com games."""
     settings = _execute(lambda: get_settings(username, data_dir=data_dir))
@@ -128,13 +129,13 @@ def sync(
 
 @app.command()
 def analyze(
-    username: str | None = typer.Option(None, "--username"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-    stockfish_path: str | None = typer.Option(None, "--stockfish-path"),
-    depth: int | None = typer.Option(None, "--depth"),
-    inaccuracy_cpl: int | None = typer.Option(None, "--inaccuracy-cpl"),
-    mistake_cpl: int | None = typer.Option(None, "--mistake-cpl"),
-    blunder_cpl: int | None = typer.Option(None, "--blunder-cpl"),
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    stockfish_path: Annotated[str | None, typer.Option("--stockfish-path")] = None,
+    depth: Annotated[int | None, typer.Option("--depth")] = None,
+    inaccuracy_cpl: Annotated[int | None, typer.Option("--inaccuracy-cpl")] = None,
+    mistake_cpl: Annotated[int | None, typer.Option("--mistake-cpl")] = None,
+    blunder_cpl: Annotated[int | None, typer.Option("--blunder-cpl")] = None,
 ) -> None:
     """Parse PGNs and run resumable Stockfish analysis."""
     settings = _execute(
@@ -154,11 +155,11 @@ def analyze(
 
 @app.command()
 def features(
-    username: str | None = typer.Option(None, "--username"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-    inaccuracy_cpl: int | None = typer.Option(None, "--inaccuracy-cpl"),
-    mistake_cpl: int | None = typer.Option(None, "--mistake-cpl"),
-    blunder_cpl: int | None = typer.Option(None, "--blunder-cpl"),
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    inaccuracy_cpl: Annotated[int | None, typer.Option("--inaccuracy-cpl")] = None,
+    mistake_cpl: Annotated[int | None, typer.Option("--mistake-cpl")] = None,
+    blunder_cpl: Annotated[int | None, typer.Option("--blunder-cpl")] = None,
 ) -> None:
     """Create the ML-ready feature dataset."""
     settings = _execute(
@@ -176,9 +177,9 @@ def features(
 
 @app.command()
 def train(
-    username: str | None = typer.Option(None, "--username"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-    model_dir: Path | None = typer.Option(None, "--model-dir"),
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
 ) -> None:
     """Train the personalized LightGBM mistake-risk model."""
     settings = _execute(
@@ -191,10 +192,10 @@ def train(
 
 @app.command()
 def report(
-    username: str | None = typer.Option(None, "--username"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-    model_dir: Path | None = typer.Option(None, "--model-dir"),
-    min_group_size: int | None = typer.Option(None, "--min-group-size"),
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
+    min_group_size: Annotated[int | None, typer.Option("--min-group-size")] = None,
 ) -> None:
     """Generate a statistically guarded coaching report."""
     settings = _execute(

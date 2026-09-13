@@ -100,7 +100,7 @@ def build_coaching_report(
         raise ValueError("Feature dataset is empty")
     overall_mistake_rate = float(frame["significant_mistake"].mean())
     overall = {
-        "samples": int(len(frame)),
+        "samples": len(frame),
         "mistake_rate": overall_mistake_rate,
         "blunder_rate": float((frame["quality"] == "blunder").mean()),
         "mean_cpl": float(frame["cpl"].mean()),
