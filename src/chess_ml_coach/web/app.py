@@ -48,7 +48,7 @@ def _artifact_state(path: Path, *, parquet_rows: bool = False) -> ArtifactState:
             import pyarrow.parquet as pq
 
             rows = int(pq.ParquetFile(path).metadata.num_rows)
-        except Exception:
+        except (OSError, ValueError):
             rows = None
     return ArtifactState(
         exists=True,
