@@ -63,6 +63,35 @@ def test_upsert_is_idempotent_and_preserves_review_history(tmp_path: Path):
     assert store.review_count("p1") == 1
 
 
+def test_rebuild_deactivates_obsolete_puzzles_without_deleting_history(tmp_path: Path):
+    store = _store(tmp_path)
+    now = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
+    store.upsert_puzzles([_seed("p1"), _seed("p2")], now=now)
+    store.record_review("p1", answer="e4", correct=False, now=now)
+
+    rebuild_time = now + timedelta(days=2)
+    result = store.upsert_puzzles([_seed("p2")], now=rebuild_time)
+
+    assert result.total == 1
+    assert [puzzle.puzzle_id for puzzle in store.due_puzzles(limit=10, now=rebuild_time)] == ["p2"]
+    stale = store.get_puzzle("p1")
+    assert stale is not None
+    assert stale.active is False
+    assert stale.attempts == 1
+    assert store.review_count("p1") == 1
+    assert store.progress(now=rebuild_time).total_puzzles == 1
+
+    store.upsert_puzzles(
+        [_seed("p1"), _seed("p2")],
+        now=rebuild_time + timedelta(hours=1),
+    )
+    restored = store.get_puzzle("p1")
+    assert restored is not None
+    assert restored.active is True
+    assert restored.attempts == 1
+    assert store.review_count("p1") == 1
+
+
 def test_spaced_repetition_schedule_and_mastery(tmp_path: Path):
     store = _store(tmp_path)
     now = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
