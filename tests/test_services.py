@@ -3,7 +3,6 @@ from pathlib import Path
 from chess_ml_coach.config import Settings
 from chess_ml_coach.services import answer_to_uci, run_puzzles, training_db_path
 
-
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 
