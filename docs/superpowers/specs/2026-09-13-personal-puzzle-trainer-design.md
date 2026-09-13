@@ -23,6 +23,7 @@ Turn the existing Chess ML Coach from an analytics-only pipeline into a training
 - Rows where the player's move equals Stockfish's best move are excluded.
 - Rows where the player's move delivers checkmate are excluded.
 - Stable puzzle IDs derived from `(game_id, ply, best_move_uci)` so rebuilds preserve review history.
+- Active/inactive puzzle lifecycle: corrected or obsolete mistakes leave the active practice queue without losing historical attempts and can later be reactivated with their history intact.
 - Human-readable puzzle metadata: game, move number, opening, phase, source link, actual move, best move, evaluation loss, motif, difficulty.
 - Heuristic tactical motif classification using the board and Stockfish best move.
 - Interactive CLI practice using an ASCII board and SAN/UCI input.
@@ -47,12 +48,14 @@ The first trainer should be immediately useful without forcing another expensive
 Owns persistent training state and scheduling.
 
 Responsibilities:
-- initialize SQLite schema;
+- initialize and migrate the SQLite schema;
 - upsert puzzles without destroying review state;
-- query due puzzles;
+- retire puzzles that are no longer present in the latest eligible set without deleting them;
+- reactivate returning puzzles with their review state intact;
+- query due active puzzles;
 - record attempts;
 - compute next-review timestamps;
-- aggregate progress metrics.
+- aggregate progress metrics for active puzzles.
 
 Tables:
 
@@ -84,6 +87,7 @@ Tables:
 - `last_reviewed_at TEXT`
 - `next_review_at TEXT NOT NULL`
 - `mastered INTEGER NOT NULL DEFAULT 0`
+- `active INTEGER NOT NULL DEFAULT 1`
 
 `reviews`
 - `id INTEGER PRIMARY KEY AUTOINCREMENT`
@@ -93,6 +97,13 @@ Tables:
 - `correct INTEGER NOT NULL`
 - `previous_interval_days INTEGER NOT NULL`
 - `next_interval_days INTEGER NOT NULL`
+
+Puzzle refresh semantics:
+- every refresh marks the existing bank inactive inside the same transaction;
+- every currently eligible puzzle is inserted or reactivated;
+- metadata can be refreshed, but attempts, streak, due date, mastery, and review rows are never reset;
+- inactive puzzles are excluded from due queues and current progress metrics;
+- inactive rows remain available internally so their history survives future reactivation.
 
 ### `puzzles.py`
 
@@ -129,14 +140,14 @@ New commands:
 
 `chess-coach practice --limit 10`
 - Opens the local training DB.
-- Selects due puzzles ordered by overdue status, previous failures, and difficulty.
+- Selects due active puzzles ordered by overdue status, previous failures, and difficulty.
 - Shows metadata and `chess.Board(fen)`.
 - Accepts SAN or UCI; `q` exits cleanly.
 - Correct answer records a success and schedules a later review.
 - Wrong answer records a failure, reveals the best move, and schedules it for the next day.
 
 `chess-coach progress`
-- Shows total puzzles, due now, reviewed, mastered, overall review accuracy.
+- Shows active puzzle count, due now, reviewed, mastered, overall review accuracy.
 - Shows compact top motif/opening rows with attempts and accuracy.
 
 ## Spaced repetition
@@ -157,6 +168,7 @@ A correct answer after a previous failure starts again at the 3-day interval.
 - Training state lives under `data/`, already gitignored.
 - Rebuilding puzzles is idempotent and never deletes review history.
 - Existing puzzles that still exist in source data are metadata-refreshed but review counters remain intact.
+- Puzzles absent from the newest eligible set are marked inactive rather than deleted.
 - Invalid FENs/moves are skipped rather than breaking the whole build.
 - Internal `game_id` remains in SQLite for joins but is not shown as the primary human identifier.
 
@@ -170,6 +182,7 @@ Add focused tests for:
 - spaced repetition intervals and mastery;
 - due ordering;
 - persistent review history across puzzle rebuilds;
+- obsolete-puzzle retirement and history-preserving reactivation;
 - CLI command exposure and practice answer handling;
 - progress aggregation.
 
