@@ -185,6 +185,7 @@ Puzzle generation:
 - excludes positions where your move already equals Stockfish's best move;
 - excludes moves where you delivered checkmate;
 - is idempotent, so rebuilding the bank preserves attempts, streaks, due dates, mastery, and review history;
+- retires positions that are no longer mistakes from active practice without deleting their history, and restores that history if they later become eligible again;
 - shows scanning progress for large datasets.
 
 Each puzzle stores the position before your move, your move, Stockfish's best move, game/opening/phase metadata, evaluation loss, source-game link, difficulty, and a heuristic tactical theme.
