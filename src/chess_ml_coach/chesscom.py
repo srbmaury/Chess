@@ -35,11 +35,13 @@ class ChessComClient:
         )
         self.retries = retries
 
-    def _json(self, url: str) -> dict:
+    def _json(self, url: str, *, allow_unavailable: bool = False) -> dict | None:
         for attempt in range(self.retries + 1):
             response = self.http.get(url)
             if response.status_code < 400:
                 return response.json()
+            if allow_unavailable and response.status_code in {404, 410}:
+                return None
             if response.status_code in {429, 500, 502, 503, 504} and attempt < self.retries:
                 time.sleep(2**attempt)
                 continue
@@ -47,10 +49,16 @@ class ChessComClient:
         raise AssertionError("unreachable")
 
     def archive_urls(self, username: str) -> list[str]:
-        return self._json(f"{API}/player/{username}/games/archives").get("archives", [])
+        data = self._json(f"{API}/player/{username}/games/archives")
+        if data is None:
+            raise AssertionError("archive index cannot be unavailable")
+        return data.get("archives", [])
 
-    def games_for_archive(self, archive_url: str) -> list[dict]:
-        return self._json(archive_url).get("games", [])
+    def games_for_archive(self, archive_url: str) -> list[dict] | None:
+        data = self._json(archive_url, allow_unavailable=True)
+        if data is None:
+            return None
+        return data.get("games", [])
 
 
 def canonical_game_id(game: dict) -> str:
@@ -113,7 +121,10 @@ def sync_games(client: ChessComClient, settings: Settings) -> SyncResult:
     archives_done: list[str] = []
 
     for archive_url in client.archive_urls(settings.username):
-        games = merge_games(games, client.games_for_archive(archive_url))
+        archive_games = client.games_for_archive(archive_url)
+        if archive_games is None:
+            continue
+        games = merge_games(games, archive_games)
         archives_done.append(archive_url)
         pgn_path, manifest_path = _persist_sync(raw_dir, settings.username, games, archives_done)
 
