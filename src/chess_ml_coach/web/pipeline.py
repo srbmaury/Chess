@@ -145,14 +145,14 @@ class PipelineManager:
                     finished_at=finished_at,
                     error=str(exc),
                 )
-            self._record_event(
-                {
-                    "stage": stage,
-                    "status": "failed",
-                    "error": str(exc),
-                    "finished_at": finished_at.isoformat(),
-                }
-            )
+                self._record_event(
+                    {
+                        "stage": stage,
+                        "status": "failed",
+                        "error": str(exc),
+                        "finished_at": finished_at.isoformat(),
+                    }
+                )
             return
 
         finished_at = datetime.now(UTC)
@@ -164,11 +164,11 @@ class PipelineManager:
                 finished_at=finished_at,
                 result=result,
             )
-        self._record_event(
-            {
-                "stage": stage,
-                "status": "succeeded",
-                "result": result,
-                "finished_at": finished_at.isoformat(),
-            }
-        )
+            self._record_event(
+                {
+                    "stage": stage,
+                    "status": "succeeded",
+                    "result": result,
+                    "finished_at": finished_at.isoformat(),
+                }
+            )
