@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import chess
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -267,7 +267,7 @@ def create_app(
     @app.post("/api/pipeline/{stage}", status_code=202)
     def start_pipeline(
         stage: str,
-        options: dict[str, object] | None = Body(default=None),
+        options: dict[str, object] | None = None,
     ) -> dict[str, object]:
         try:
             snapshot = manager.start(stage, options)
