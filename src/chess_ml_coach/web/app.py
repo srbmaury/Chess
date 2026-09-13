@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import json
+import time
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
 import chess
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
+from .pipeline import (
+    TERMINAL_STATUSES,
+    PipelineBusyError,
+    PipelineManager,
+    UnknownPipelineStageError,
+)
 from .schemas import (
     ArtifactState,
     AttemptRequest,
@@ -99,10 +110,16 @@ def _public_practice_puzzle(puzzle) -> PracticePuzzle:
     )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    pipeline_manager: PipelineManager | None = None,
+) -> FastAPI:
     resolved = settings or Settings()
+    manager = pipeline_manager or PipelineManager(resolved)
     app = FastAPI(title="Chess ML Coach", version=APP_VERSION)
     app.state.settings = resolved
+    app.state.pipeline_manager = manager
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -242,5 +259,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             by_opening=[ProgressGroupRow(**row.__dict__) for row in summary.by_opening],
             daily_reviews=daily_reviews(db_path),
         )
+
+    @app.get("/api/pipeline/status")
+    def pipeline_status() -> dict[str, object]:
+        return jsonable_encoder(asdict(manager.snapshot()))
+
+    @app.post("/api/pipeline/{stage}", status_code=202)
+    def start_pipeline(
+        stage: str,
+        options: dict[str, object] | None = Body(default=None),
+    ) -> dict[str, object]:
+        try:
+            snapshot = manager.start(stage, options)
+        except UnknownPipelineStageError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PipelineBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return jsonable_encoder(asdict(snapshot))
+
+    @app.get("/api/pipeline/events")
+    def pipeline_events(after_sequence: int = Query(default=0, ge=0)) -> StreamingResponse:
+        def stream():
+            sequence = after_sequence
+            while True:
+                events = manager.events(after_sequence=sequence)
+                for event in events:
+                    sequence = event.sequence
+                    payload = {
+                        "sequence": event.sequence,
+                        "created_at": event.created_at.isoformat(),
+                        **event.payload,
+                    }
+                    encoded = json.dumps(jsonable_encoder(payload), separators=(",", ":"))
+                    yield f"data: {encoded}\n\n"
+                snapshot = manager.snapshot()
+                if snapshot.status in TERMINAL_STATUSES and not manager.events(
+                    after_sequence=sequence
+                ):
+                    break
+                if not events:
+                    yield ": heartbeat\n\n"
+                    time.sleep(0.25)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     return app
