@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -13,6 +14,7 @@ PIECE_VALUES = {
     chess.ROOK: 5,
     chess.QUEEN: 9,
 }
+PuzzleProgress = Callable[[dict[str, object]], None]
 
 
 @dataclass(frozen=True)
@@ -154,9 +156,35 @@ def _actual_move_delivers_mate(board: chess.Board, actual_uci: str) -> bool:
     return played.is_checkmate()
 
 
-def extract_puzzles(frame: pd.DataFrame) -> list[PuzzleSeed]:
+def _emit_progress(
+    progress: PuzzleProgress | None,
+    *,
+    current: int,
+    total: int,
+    eligible: int,
+) -> None:
+    if progress is None:
+        return
+    progress(
+        {
+            "stage": "puzzles",
+            "current": current,
+            "total": total,
+            "eligible": eligible,
+        }
+    )
+
+
+def extract_puzzles(
+    frame: pd.DataFrame,
+    progress: PuzzleProgress | None = None,
+) -> list[PuzzleSeed]:
     seeds: list[PuzzleSeed] = []
-    for _, row in frame.iterrows():
+    total = len(frame)
+    _emit_progress(progress, current=0, total=total, eligible=0)
+    for index, (_, row) in enumerate(frame.iterrows(), start=1):
+        if index % 1000 == 0:
+            _emit_progress(progress, current=index, total=total, eligible=len(seeds))
         if _text(row.get("quality")).lower() not in {"mistake", "blunder"}:
             continue
 
@@ -209,4 +237,5 @@ def extract_puzzles(frame: pd.DataFrame) -> list[PuzzleSeed]:
                 difficulty=_difficulty(cpl, board.legal_moves.count(), motif),
             )
         )
+    _emit_progress(progress, current=total, total=total, eligible=len(seeds))
     return seeds
