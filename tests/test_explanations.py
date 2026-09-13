@@ -4,8 +4,8 @@ from pathlib import Path
 import chess
 import chess.engine
 
+from chess_ml_coach import explanations
 from chess_ml_coach.config import Settings
-from chess_ml_coach.explanations import ExplanationStore, PuzzleExplanationService
 from chess_ml_coach.puzzles import PuzzleSeed
 from chess_ml_coach.training import TrainingStore
 
@@ -43,7 +43,7 @@ def _puzzle(tmp_path: Path):
     store.upsert_puzzles([_seed()], now=datetime(2026, 1, 1, tzinfo=UTC))
     puzzle = store.get_puzzle("p1")
     assert puzzle is not None
-    return puzzle, ExplanationStore(db)
+    return puzzle, explanations.ExplanationStore(db)
 
 
 def test_first_explanation_uses_engine_then_reuses_cache(tmp_path: Path):
@@ -62,7 +62,7 @@ def test_first_explanation_uses_engine_then_reuses_cache(tmp_path: Path):
         }
 
     settings = Settings(stockfish_depth=14)
-    service = PuzzleExplanationService(settings, cache, analyse=analyse)
+    service = explanations.PuzzleExplanationService(settings, cache, analyse=analyse)
 
     first = service.explain(puzzle)
     second = service.explain(puzzle)
@@ -86,7 +86,9 @@ def test_engine_failure_returns_uncached_board_fallback(tmp_path: Path):
         calls += 1
         raise RuntimeError("stockfish unavailable")
 
-    service = PuzzleExplanationService(Settings(stockfish_depth=14), cache, analyse=fail)
+    service = explanations.PuzzleExplanationService(
+        Settings(stockfish_depth=14), cache, analyse=fail
+    )
 
     first = service.explain(puzzle)
     second = service.explain(puzzle)
