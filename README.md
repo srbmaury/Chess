@@ -6,20 +6,30 @@ The project deliberately separates **chess strength** from **personalization**:
 
 - **Stockfish** evaluates positions, finds the best move, and measures centipawn loss (CPL).
 - **LightGBM** learns which kinds of positions are risky *for you* based on your historical decisions.
-- The report turns those signals into recurring weakness contexts and positions worth revisiting.
+- The coaching report turns those signals into recurring weakness contexts.
+- The **personal puzzle trainer** turns genuine mistakes from your own games into spaced-repetition practice.
 
 It does **not** try to train a chess engine from your games or replace Stockfish.
 
-## What V1 does
+## How it works
 
 ```text
 Chess.com PubAPI
       |
       v
-sync -> PGN corpus -> parse -> Stockfish analysis -> features -> LightGBM -> report
+sync -> PGN corpus -> Stockfish analysis -> features -> LightGBM -> report
+                                          |
+                                          v
+                                   personal puzzles
+                                          |
+                                          v
+                              spaced-repetition practice
+                                          |
+                                          v
+                                   progress tracking
 ```
 
-The CLI has five stages:
+Core analysis pipeline:
 
 ```bash
 chess-coach sync
@@ -29,7 +39,15 @@ chess-coach train
 chess-coach report
 ```
 
-Each stage writes a local artifact and can be run independently once its prerequisites exist.
+Training loop:
+
+```bash
+chess-coach puzzles
+chess-coach practice --limit 10
+chess-coach progress
+```
+
+Each stage writes local artifacts. Once Stockfish has analyzed a move at the current configuration, downstream puzzle generation and practice reuse that analysis and do **not** run Stockfish again.
 
 ## Requirements
 
@@ -69,9 +87,9 @@ $env:STOCKFISH_PATH = "C:\path\to\stockfish.exe"
 
 You can also pass `--stockfish-path` directly to `chess-coach analyze`.
 
-## Run the pipeline
+## Run the analysis pipeline
 
-### 1. Download all Chess.com games
+### 1. Download Chess.com games
 
 ```bash
 chess-coach sync
@@ -83,9 +101,9 @@ The default username is `srbmaury`. To use another account:
 chess-coach sync --username another_user
 ```
 
-The sync is idempotent: already-known games are deduplicated, while newly published monthly games are added to the local corpus.
+Sync is idempotent: already-known games are deduplicated, newly published games are added, and unavailable monthly archives are skipped safely.
 
-### 2. Parse games and analyze your moves with Stockfish
+### 2. Analyze your moves with Stockfish
 
 ```bash
 chess-coach analyze
@@ -99,9 +117,9 @@ chess-coach analyze \
   --depth 14
 ```
 
-Analysis is resumable. Completed `(game, move, engine configuration)` rows are reused. If the engine configuration changes, stale analysis for the old configuration is replaced rather than mixed into the new dataset.
+Depth 14 is the default. Analysis is resumable and prints live progress such as reused vs newly analyzed moves. Completed `(game, move, engine configuration)` rows are reused. A single-writer lock prevents two concurrent analyzers from corrupting the same artifact.
 
-### 3. Build the ML dataset
+### 3. Build the feature dataset
 
 ```bash
 chess-coach features
@@ -127,9 +145,9 @@ The default target is:
 significant_mistake = 1 when CPL >= 100
 ```
 
-Games are split chronologically at **game level**, so moves from a single game can never leak between training and test partitions.
+Games are split chronologically at **game level**, so moves from one game cannot leak between training and test partitions. Training prints its major stages while it runs.
 
-### 5. Generate your coaching report
+### 5. Generate the coaching report
 
 ```bash
 chess-coach report
@@ -137,12 +155,103 @@ chess-coach report
 
 The report includes:
 
+- actionable training priorities;
 - overall mistake and blunder rates;
 - White vs Black breakdown;
 - opening, game-phase, and time-control breakdowns with minimum-sample guards;
 - recurring high-risk contexts;
-- model feature importance with a correlation-not-causation warning;
-- high-CPL positions from your own games that are good candidates for future puzzle generation.
+- human-readable evaluation losses;
+- selected training positions from your own games;
+- human-readable model feature importance with a correlation-not-causation warning.
+
+## Train on your own mistakes
+
+### 6. Build or refresh your puzzle bank
+
+```bash
+chess-coach puzzles
+```
+
+This reads `data/processed/features.parquet` and extracts genuine mistakes/blunders into:
+
+```text
+data/training/training.db
+```
+
+Puzzle generation:
+
+- reuses existing Stockfish analysis;
+- does **not** launch Stockfish;
+- excludes positions where your move already equals Stockfish's best move;
+- excludes moves where you delivered checkmate;
+- is idempotent, so rebuilding the bank preserves attempts, streaks, due dates, mastery, and review history;
+- shows scanning progress for large datasets.
+
+Each puzzle stores the position before your move, your move, Stockfish's best move, game/opening/phase metadata, evaluation loss, source-game link, difficulty, and a heuristic tactical theme.
+
+Tactical-theme labels such as `fork`, `pin`, `missed mate`, `forcing check`, and `winning capture` are **heuristics for training organization**, not exhaustive tactical proofs.
+
+### 7. Practice due puzzles
+
+```bash
+chess-coach practice --limit 10
+```
+
+For each due position the CLI shows an ASCII board and asks for your move. You can enter either SAN or UCI:
+
+```text
+Your move (SAN/UCI, q to quit): d4
+```
+
+The trainer records the result and schedules the position again using a simple spaced-repetition policy:
+
+| Result / streak | Next review |
+| --- | ---: |
+| Incorrect | 1 day |
+| 1 correct in a row | 3 days |
+| 2 correct in a row | 7 days |
+| 3 correct in a row | 14 days |
+| 4+ correct in a row | 30 days |
+
+A puzzle is marked mastered after four consecutive correct reviews. A later failure resets the streak and brings it back the next day.
+
+Use `q` to stop a practice session without recording an attempt for the current puzzle.
+
+### 8. Track training progress
+
+```bash
+chess-coach progress
+```
+
+This reports:
+
+- total puzzles;
+- puzzles currently due;
+- puzzles reviewed at least once;
+- mastered puzzles;
+- total review attempts and accuracy;
+- accuracy grouped by heuristic motif;
+- accuracy grouped by opening.
+
+A useful regular workflow is:
+
+```bash
+# After playing new games
+chess-coach sync
+chess-coach analyze
+chess-coach features
+chess-coach puzzles
+
+# Most days
+chess-coach practice --limit 10
+chess-coach progress
+
+# Periodically, when enough new games exist
+chess-coach train
+chess-coach report
+```
+
+The expensive step is Stockfish analysis. Once your historical corpus is analyzed at the same depth/configuration, later runs mainly analyze newly synced moves; puzzle practice itself is lightweight.
 
 ## Local artifact layout
 
@@ -159,15 +268,17 @@ data/
 │   ├── moves.parquet
 │   ├── features.parquet
 │   └── coaching_report.md
-└── engine/
-    └── analysis.parquet
+├── engine/
+│   └── analysis.parquet
+└── training/
+    └── training.db
 
 models/
 ├── mistake_model.joblib
 └── mistake_model.metadata.json
 ```
 
-The repository contains code, tests, synthetic fixtures, documentation, and CI only. Raw PGNs, processed personal game data, trained models, caches, and `.env` files are excluded by `.gitignore`.
+The repository contains code, tests, synthetic fixtures, documentation, and CI only. Raw PGNs, processed personal game data, puzzle/review history, trained models, caches, and `.env` files are excluded by `.gitignore`.
 
 ## Move-quality labels
 
@@ -222,12 +333,12 @@ pytest --cov=chess_ml_coach --cov-report=term-missing
 
 The tests mock network and engine boundaries, so CI does not require a Chess.com account, live PubAPI calls, or a Stockfish binary.
 
-## V1 limitations and likely next steps
+## Next improvements
 
-V1 focuses on a reliable, explainable local pipeline. Useful follow-ups are:
+The local training loop is intentionally simple and explainable. High-value follow-ups are:
 
-- turn your worst historical positions into a spaced-repetition puzzle queue;
-- richer tactical-pattern classification (forks, pins, overloaded defenders, mating nets);
-- SHAP-based per-position explanations;
-- progress tracking by rolling time window;
-- a FastAPI/React dashboard after the analytics prove useful.
+- multi-ply puzzle continuations rather than validating only the first best move;
+- stronger tactical-motif classification for overloaded defenders, skewers, discovered attacks, back-rank themes, and mating nets;
+- rolling 7/30/90-day improvement tracking that compares recent games against older baselines;
+- SHAP-based per-position explanations for the LightGBM risk model;
+- a web chessboard/dashboard after the training loop proves useful.
