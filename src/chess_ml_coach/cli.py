@@ -302,5 +302,33 @@ def progress(
     _print_progress_rows("Top openings:", summary.by_opening)
 
 
+@app.command()
+def ui(
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
+    no_open: Annotated[bool, typer.Option("--no-open")] = False,
+) -> None:
+    """Start the local Chess ML Coach web application."""
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from .web.serve import create_served_app
+
+    settings = _execute(
+        lambda: get_settings(username, data_dir=data_dir, model_dir=model_dir)
+    )
+    web_app = _execute(lambda: create_served_app(settings))
+    url = f"http://{host}:{port}"
+    typer.echo(f"Chess ML Coach UI -> {url}")
+    if not no_open:
+        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+    uvicorn.run(web_app, host=host, port=port)
+
+
 if __name__ == "__main__":
     app()
