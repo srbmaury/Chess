@@ -325,9 +325,12 @@ def _analyze_user_moves_unlocked(
             best_move = pv[0].uci() if pv else None
             actual_move = getattr(row, "uci", None)
             delivered_mate = after_board.is_checkmate()
-            if best_move is not None and actual_move is not None and best_move == str(actual_move):
-                cpl = 0
-            elif delivered_mate:
+            is_best_move = (
+                best_move is not None
+                and actual_move is not None
+                and best_move == str(actual_move)
+            )
+            if is_best_move or delivered_mate:
                 cpl = 0
             else:
                 cpl = centipawn_loss(before_eval, after_eval)
