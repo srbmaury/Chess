@@ -2,9 +2,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from chess_ml_coach.training import TrainingStore
-
 from chess_ml_coach.puzzles import PuzzleSeed
+from chess_ml_coach.training import TrainingStore
 
 
 def _seed(
