@@ -1,5 +1,4 @@
 import pandas as pd
-
 from chess_ml_coach.puzzles import classify_motif, extract_puzzles
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -90,7 +89,5 @@ def test_classifies_knight_fork_of_two_higher_value_pieces():
 
 
 def test_classifies_winning_capture():
-    fen = "8/7k/8/8/8/8/8/q6K w - - 0 1"
-    # White king on h1 cannot capture the queen; use a rook capture position instead.
     fen = "8/7k/8/8/8/8/8/qR5K w - - 0 1"
     assert classify_motif(fen, "b1a1") == "winning capture"
