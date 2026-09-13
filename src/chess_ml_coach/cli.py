@@ -309,7 +309,7 @@ def ui(
     model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
-    no_open: Annotated[bool, typer.Option("--no-open")] = False,
+    no_open: Annotated[bool, typer.Option("--no-open", is_flag=True)] = False,
 ) -> None:
     """Start the local Chess ML Coach web application."""
     import threading
