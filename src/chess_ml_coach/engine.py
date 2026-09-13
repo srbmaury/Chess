@@ -129,7 +129,7 @@ def _analysis_lock(output_path: Path) -> Iterator[None]:
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(str(os.getpid()))
-       yield
+        yield
     finally:
         lock_path.unlink(missing_ok=True)
 
