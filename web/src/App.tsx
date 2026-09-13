@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
+import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts'
 
@@ -60,18 +61,43 @@ function DashboardPage() {
 function PracticePage() {
   const [puzzle, setPuzzle] = useState<PracticePuzzle | null | undefined>(undefined)
   const [feedback, setFeedback] = useState<Attempt | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const load = useCallback(() => { setFeedback(null); setError(''); setPuzzle(undefined); api.nextPuzzle().then((r) => setPuzzle(r.puzzle)).catch((x: Error) => setError(x.message)) }, [])
+  const load = useCallback(() => { setFeedback(null); setSubmitting(false); setError(''); setPuzzle(undefined); api.nextPuzzle().then((r) => setPuzzle(r.puzzle)).catch((x: Error) => setError(x.message)) }, [])
   useEffect(load, [load])
-  async function onDrop(sourceSquare: string, targetSquare: string | null) {
-    if (!puzzle || feedback || !targetSquare) return false
-    try { setFeedback(await api.attempt(puzzle.puzzle_id, `${sourceSquare}${targetSquare}`)); return true } catch (x) { setError((x as Error).message); return false }
+
+  async function submitMove(moveUci: string) {
+    if (!puzzle || feedback || submitting) return
+    setSubmitting(true)
+    try {
+      setFeedback(await api.attempt(puzzle.puzzle_id, moveUci))
+    } catch (x) {
+      setError((x as Error).message)
+      setSubmitting(false)
+    }
   }
-  async function skip() { if (!puzzle) return; await api.skip(puzzle.puzzle_id); load() }
+
+  function onDrop(sourceSquare: string, targetSquare: string | null) {
+    if (!puzzle || feedback || submitting || !targetSquare) return false
+    let moveUci = `${sourceSquare}${targetSquare}`
+    try {
+      const position = new Chess(puzzle.fen)
+      const piece = position.get(sourceSquare as never)
+      if (piece?.type === 'p' && (targetSquare.endsWith('1') || targetSquare.endsWith('8'))) {
+        moveUci += 'q'
+      }
+    } catch {
+      // The backend remains authoritative; submit the basic UCI move if local parsing fails.
+    }
+    void submitMove(moveUci)
+    return true
+  }
+
+  async function skip() { if (!puzzle || submitting) return; await api.skip(puzzle.puzzle_id); load() }
   if (error) return <section><Heading kicker="PRACTICE" title="Puzzle trainer" copy="Solve positions from your own games." /><ErrorBox message={error} /><button onClick={load}>Retry</button></section>
   if (puzzle === undefined) return <p className="muted">Loading next puzzle…</p>
   if (!puzzle) return <section className="empty"><h1>You're caught up</h1><p>No puzzles are due right now.</p></section>
-  return <section><Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} /><div className="practice"><div className="board"><Chessboard options={{ position: puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div><div className="panel practice-info"><h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>{!feedback ? <><p className="muted">Find the strongest move. The engine answer stays hidden until you commit.</p><button className="ghost" onClick={skip}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button onClick={load}>Next puzzle</button></div>}</div></div></section>
+  return <section><Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} /><div className="practice"><div className="board"><Chessboard options={{ position: puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div><div className="panel practice-info"><h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>{!feedback ? <><p className="muted">{submitting ? 'Checking your move…' : 'Find the strongest move. The engine answer stays hidden until you commit.'}</p><button className="ghost" disabled={submitting} onClick={skip}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button onClick={load}>Next puzzle</button></div>}</div></div></section>
 }
 
 function MistakesPage() {
