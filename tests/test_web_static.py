@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import click
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -38,9 +39,10 @@ def test_served_app_requires_built_frontend(tmp_path: Path):
 def test_cli_exposes_ui_and_defaults_to_localhost():
     help_result = runner.invoke(app, ["--help"])
     assert help_result.exit_code == 0
-    assert "ui" in help_result.stdout
+    assert "ui" in click.unstyle(help_result.stdout)
 
     ui_help = runner.invoke(app, ["ui", "--help"])
     assert ui_help.exit_code == 0
-    assert "127.0.0.1" in ui_help.stdout
-    assert "--no-open" in ui_help.stdout
+    plain_help = click.unstyle(ui_help.stdout)
+    assert "127.0.0.1" in plain_help
+    assert "--no-open" in plain_help
