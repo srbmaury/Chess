@@ -47,7 +47,7 @@ def _text(value: object, default: str = "") -> str:
 
 
 def _stable_puzzle_id(game_id: str, ply: int, best_move_uci: str) -> str:
-    raw = f"{game_id}:{ply}:{best_move_uci}".encode("utf-8")
+    raw = f"{game_id}:{ply}:{best_move_uci}".encode()
     return sha256(raw).hexdigest()[:24]
 
 
