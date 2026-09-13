@@ -53,6 +53,14 @@ def _print_train_progress(event: dict[str, object]) -> None:
     typer.echo(f"[train] {event.get('message', event.get('stage', 'working'))}")
 
 
+def _print_puzzle_progress(event: dict[str, object]) -> None:
+    typer.echo(
+        f"\r[puzzles] scanning {event.get('current')}/{event.get('total')} • "
+        f"{event.get('eligible')} eligible",
+        nl=False,
+    )
+
+
 def _run_sync(settings: Settings, progress: ProgressCallback | None = None) -> dict:
     from .chesscom import ChessComClient, sync_games
 
@@ -142,6 +150,136 @@ def _run_report(settings: Settings) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_markdown(report), encoding="utf-8")
     return {"output": output, "samples": report.overall["samples"]}
+
+
+def _training_db_path(settings: Settings) -> Path:
+    return settings.data_dir / "training" / "training.db"
+
+
+def _run_puzzles(settings: Settings, progress: ProgressCallback | None = None) -> dict:
+    import pandas as pd
+
+    from .puzzles import extract_puzzles
+    from .training import TrainingStore
+
+    features_path = settings.data_dir / "processed" / "features.parquet"
+    if not features_path.exists():
+        raise FileNotFoundError(f"Missing {features_path}. Run `chess-coach features` first.")
+    frame = pd.read_parquet(features_path)
+    seeds = extract_puzzles(frame, progress=progress)
+    db_path = _training_db_path(settings)
+    result = TrainingStore(db_path).upsert_puzzles(seeds)
+    return {
+        "source_rows": len(frame),
+        "eligible": len(seeds),
+        "skipped": len(frame) - len(seeds),
+        "inserted": result.inserted,
+        "updated": result.updated,
+        "total": result.total,
+        "db_path": db_path,
+    }
+
+
+def _answer_to_uci(fen: str, answer: str) -> str | None:
+    import chess
+
+    board = chess.Board(fen)
+    normalized = answer.strip()
+    if not normalized:
+        return None
+    try:
+        move = chess.Move.from_uci(normalized.lower())
+        if move in board.legal_moves:
+            return move.uci()
+    except ValueError:
+        pass
+    try:
+        return board.parse_san(normalized).uci()
+    except ValueError:
+        return None
+
+
+def _run_practice(settings: Settings, limit: int) -> dict:
+    import chess
+
+    from .training import TrainingStore
+
+    if limit <= 0:
+        raise ValueError("--limit must be greater than zero")
+    db_path = _training_db_path(settings)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Missing {db_path}. Run `chess-coach puzzles` first.")
+    store = TrainingStore(db_path)
+    due = store.due_puzzles(limit=limit)
+    if not due:
+        typer.echo("No puzzles are due right now. Use `chess-coach progress` to see your schedule.")
+        return {"reviewed": 0, "correct": 0, "stopped": False}
+
+    reviewed = 0
+    correct_count = 0
+    for index, puzzle in enumerate(due, start=1):
+        board = chess.Board(puzzle.fen_before)
+        side = "White" if board.turn == chess.WHITE else "Black"
+        typer.echo("")
+        typer.echo(f"Puzzle {index}/{len(due)} • {side} to move")
+        typer.echo(f"Game: {puzzle.game_label} • {puzzle.move_label}")
+        typer.echo(f"Opening: {puzzle.opening} ({puzzle.eco})")
+        typer.echo(f"Phase: {puzzle.game_phase}")
+        typer.echo(f"Theme (heuristic): {puzzle.motif} • Difficulty: {puzzle.difficulty}/5")
+        typer.echo(str(board))
+        answer = typer.prompt("Your move (SAN/UCI, q to quit)").strip()
+        if answer.lower() in {"q", "quit", "exit"}:
+            typer.echo("Practice stopped. No review was recorded for this puzzle.")
+            return {"reviewed": reviewed, "correct": correct_count, "stopped": True}
+
+        answer_uci = _answer_to_uci(puzzle.fen_before, answer)
+        correct = answer_uci == puzzle.best_move_uci
+        review = store.record_review(
+            puzzle.puzzle_id,
+            answer=answer,
+            correct=correct,
+        )
+        reviewed += 1
+        if correct:
+            correct_count += 1
+            typer.echo(f"Correct! Best move: {puzzle.best_move_san}")
+        else:
+            typer.echo(f"Not quite. Best move: {puzzle.best_move_san}")
+            typer.echo(f"You played in the game: {puzzle.your_move_san}")
+            typer.echo(f"Evaluation loss: {puzzle.eval_loss_pawns:.2f} pawns")
+        typer.echo(
+            f"Next review: {review.next_review_at.date().isoformat()} "
+            f"(+{review.next_interval_days} days)"
+        )
+        if puzzle.source_url:
+            typer.echo(f"Game: {puzzle.source_url}")
+
+    return {"reviewed": reviewed, "correct": correct_count, "stopped": False}
+
+
+def _run_progress(settings: Settings):
+    from .training import TrainingStore
+
+    db_path = _training_db_path(settings)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Missing {db_path}. Run `chess-coach puzzles` first.")
+    return TrainingStore(db_path).progress()
+
+
+def _accuracy_text(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1%}"
+
+
+def _print_progress_rows(title: str, rows) -> None:
+    typer.echo(title)
+    if not rows:
+        typer.echo("  No data yet.")
+        return
+    for row in rows[:8]:
+        typer.echo(
+            f"  {row.label}: {row.puzzles} puzzles • {row.attempts} reviews • "
+            f"{_accuracy_text(row.accuracy)} accuracy"
+        )
 
 
 @app.command()
@@ -239,6 +377,56 @@ def report(
     )
     result = _execute(lambda: _run_report(settings))
     typer.echo(f"Generated report from {result['samples']} moves -> {result['output']}")
+
+
+@app.command()
+def puzzles(
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Build or refresh a personal puzzle bank from analyzed mistakes."""
+    settings = _execute(lambda: get_settings(username, data_dir=data_dir))
+    result = _execute(lambda: _run_puzzles(settings, progress=_print_puzzle_progress))
+    typer.echo()
+    typer.echo(
+        f"Puzzle bank: {result['eligible']} eligible • {result['inserted']} new • "
+        f"{result['updated']} refreshed • {result['total']} total -> {result['db_path']}"
+    )
+
+
+@app.command()
+def practice(
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 10,
+) -> None:
+    """Practice due positions from your own mistakes."""
+    settings = _execute(lambda: get_settings(username, data_dir=data_dir))
+    result = _execute(lambda: _run_practice(settings, limit))
+    if result["reviewed"]:
+        typer.echo(
+            f"Session: {result['correct']}/{result['reviewed']} correct "
+            f"({_accuracy_text(result['correct'] / result['reviewed'])})"
+        )
+
+
+@app.command()
+def progress(
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Show personal puzzle review progress and recurring themes."""
+    settings = _execute(lambda: get_settings(username, data_dir=data_dir))
+    summary = _execute(lambda: _run_progress(settings))
+    typer.echo("Puzzle training progress")
+    typer.echo(f"Total puzzles: {summary.total_puzzles}")
+    typer.echo(f"Due now: {summary.due_puzzles}")
+    typer.echo(f"Reviewed: {summary.reviewed_puzzles}")
+    typer.echo(f"Mastered: {summary.mastered_puzzles}")
+    typer.echo(f"Total reviews: {summary.total_reviews}")
+    typer.echo(f"Review accuracy: {_accuracy_text(summary.accuracy)}")
+    _print_progress_rows("Top heuristic motifs:", summary.by_motif)
+    _print_progress_rows("Top openings:", summary.by_opening)
 
 
 if __name__ == "__main__":
