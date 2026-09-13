@@ -59,11 +59,14 @@ Filesystem paths use a canonical profile key derived from the username:
 
 - trim surrounding whitespace;
 - lowercase for profile identity because Chess.com usernames are treated case-insensitively by this application;
-- accept only a conservative safe username character set suitable for Chess.com identities;
-- reject empty, path-like, or traversal values such as `../foo`, slashes, backslashes, or control characters;
+- require at least three characters;
+- permit only letters, numbers, underscores (`_`), and dashes (`-`);
+- require the first and last character to be a letter or number;
+- reject usernames consisting only of numbers;
+- reject spaces, slashes, backslashes, control characters, and path-traversal values;
 - never concatenate an unchecked username directly into a filesystem path.
 
-Two inputs differing only by case map to the same local profile.
+These validation rules mirror the current published Chess.com username syntax. Two inputs differing only by case map to the same local profile.
 
 ## Preserving the existing `srbmaury` workspace
 
