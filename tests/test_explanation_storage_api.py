@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -48,11 +49,13 @@ def _store(tmp_path: Path) -> TrainingStore:
 
 
 def test_explanation_cache_round_trips_by_fingerprint_and_depth(tmp_path: Path):
-    store = _store(tmp_path)
+    training_store = _store(tmp_path)
+    module = import_module("chess_ml_coach.explanations")
+    store = module.ExplanationStore(training_store.path)
 
-    assert store.get_explanation("p1", fingerprint="abc", depth=14) is None
+    assert store.get("p1", fingerprint="abc", depth=14) is None
 
-    store.save_explanation(
+    store.save(
         "p1",
         fingerprint="abc",
         depth=14,
@@ -66,12 +69,12 @@ def test_explanation_cache_round_trips_by_fingerprint_and_depth(tmp_path: Path):
         now=datetime(2026, 1, 2, tzinfo=UTC),
     )
 
-    cached = store.get_explanation("p1", fingerprint="abc", depth=14)
+    cached = store.get("p1", fingerprint="abc", depth=14)
     assert cached is not None
     assert cached["idea"] == "Forcing line"
     assert cached["best_line"] == ["d4", "d5"]
-    assert store.get_explanation("p1", fingerprint="changed", depth=14) is None
-    assert store.get_explanation("p1", fingerprint="abc", depth=16) is None
+    assert store.get("p1", fingerprint="changed", depth=14) is None
+    assert store.get("p1", fingerprint="abc", depth=16) is None
 
 
 def test_explanation_is_hidden_until_puzzle_has_been_attempted(tmp_path: Path):
