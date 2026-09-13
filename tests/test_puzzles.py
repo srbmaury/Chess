@@ -1,4 +1,5 @@
 import pandas as pd
+
 from chess_ml_coach.puzzles import classify_motif, extract_puzzles
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
