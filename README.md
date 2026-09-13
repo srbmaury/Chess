@@ -54,6 +54,7 @@ Each stage writes local artifacts. Once Stockfish has analyzed a move at the cur
 - Python 3.11+
 - Stockfish installed locally for the `analyze` stage
 - Internet access for `sync`
+- Node.js 22+ to build the optional local web UI
 
 Chess.com game ingestion uses the public, read-only PubAPI and performs monthly archive requests sequentially.
 
@@ -254,6 +255,56 @@ chess-coach report
 
 The expensive step is Stockfish analysis. Once your historical corpus is analyzed at the same depth/configuration, later runs mainly analyze newly synced moves; puzzle practice itself is lightweight.
 
+## Local web UI
+
+The browser UI uses the same local artifacts and SQLite training history as the CLI. It does not maintain a second copy of your chess data or rerun Stockfish while browsing or practicing.
+
+Build the frontend once:
+
+```bash
+cd web
+npm install
+npm run build
+cd ..
+```
+
+Then start the app:
+
+```bash
+chess-coach ui
+```
+
+It binds to `127.0.0.1:8000` by default and opens your browser automatically. To keep the browser closed:
+
+```bash
+chess-coach ui --no-open
+```
+
+The UI contains:
+
+- **Dashboard** — analyzed-move count, due/mastered puzzles, review accuracy, and artifact readiness;
+- **Practice** — an interactive chessboard that keeps the engine answer hidden until you make a move;
+- **Mistakes** — browse your active training positions, your move, the better move, and evaluation loss;
+- **Progress** — review activity plus motif/opening accuracy;
+- **Pipeline** — run Sync, Analyze, Features, Puzzles, Train, and Report with live progress. Analyze exposes Stockfish depth and still uses the existing single-writer lock.
+
+The backend is FastAPI and the frontend is React/TypeScript/Vite. Practice correctness and spaced-repetition scheduling remain backend-authoritative.
+
+For frontend development, build once so `chess-coach ui` can serve a fallback bundle, then run:
+
+```bash
+# terminal 1
+chess-coach ui --no-open
+
+# terminal 2
+cd web
+npm run dev
+```
+
+Vite proxies `/api` to the local FastAPI process. The development CORS configuration accepts only local Vite origins.
+
+The default web server is intentionally **local-only**. Do not bind it to `0.0.0.0` or deploy it remotely without adding an authentication/storage/security design first.
+
 ## Local artifact layout
 
 All personal data and trained models are intentionally ignored by Git.
@@ -279,7 +330,7 @@ models/
 └── mistake_model.metadata.json
 ```
 
-The repository contains code, tests, synthetic fixtures, documentation, and CI only. Raw PGNs, processed personal game data, puzzle/review history, trained models, caches, and `.env` files are excluded by `.gitignore`.
+The repository contains code, tests, synthetic fixtures, documentation, and CI only. Raw PGNs, processed personal game data, puzzle/review history, trained models, caches, frontend dependencies/build output, and `.env` files are excluded by `.gitignore`.
 
 ## Move-quality labels
 
@@ -325,11 +376,20 @@ CHESS_COACH_BLUNDER_CPL
 
 ## Development
 
-Run the complete test/lint suite:
+Run the complete Python test/lint suite:
 
 ```bash
 ruff check src tests
 pytest --cov=chess_ml_coach --cov-report=term-missing
+```
+
+Run the frontend checks:
+
+```bash
+cd web
+npm install
+npm run test:run
+npm run build
 ```
 
 The tests mock network and engine boundaries, so CI does not require a Chess.com account, live PubAPI calls, or a Stockfish binary.
@@ -342,4 +402,4 @@ The local training loop is intentionally simple and explainable. High-value foll
 - stronger tactical-motif classification for overloaded defenders, skewers, discovered attacks, back-rank themes, and mating nets;
 - rolling 7/30/90-day improvement tracking that compares recent games against older baselines;
 - SHAP-based per-position explanations for the LightGBM risk model;
-- a web chessboard/dashboard after the training loop proves useful.
+- richer board annotations, arrows, hints, and variation exploration in the web UI.
