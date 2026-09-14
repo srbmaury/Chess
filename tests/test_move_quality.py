@@ -105,6 +105,26 @@ def test_forced_mate_thrown_away_is_a_miss_not_a_numeric_blunder():
     assert display_loss_pawns(99_876, assessment.reason) is None
 
 
+def test_mate_in_zero_uses_expected_score_to_preserve_direction():
+    missed = classify_move_quality(
+        before=snapshot(mate=0, expected=1.0),
+        after=snapshot(cp=80, expected=0.65),
+        cpl=100_000,
+        is_best_move=False,
+    )
+    allowed = classify_move_quality(
+        before=snapshot(cp=0, expected=0.50),
+        after=snapshot(mate=0, expected=0.0),
+        cpl=100_000,
+        is_best_move=False,
+    )
+
+    assert missed.label == "miss"
+    assert missed.reason == "forced mate was available"
+    assert allowed.label == "blunder"
+    assert allowed.reason == "allows forced mate"
+
+
 def test_allowing_forced_mate_is_always_a_blunder():
     assessment = classify_move_quality(
         before=snapshot(cp=15, expected=0.52),
