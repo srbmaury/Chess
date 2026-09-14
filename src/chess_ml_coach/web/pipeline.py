@@ -12,20 +12,16 @@ from .. import services
 from ..config import Settings
 
 PipelineRunner = Callable[[Settings, services.ProgressCallback], dict[str, Any]]
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+TERMINAL_STATUSES = {"succeeded", "failed"}
 PIPELINE_STAGES = ("sync", "analyze", "features", "puzzles", "train", "report")
 
 
 class PipelineBusyError(RuntimeError):
-    """Raised when a second pipeline job is started while another is active."""
+    """Raised when a second pipeline job is started while another is running."""
 
 
 class UnknownPipelineStageError(ValueError):
     """Raised for a stage the web pipeline does not expose."""
-
-
-class PipelineCancelled(RuntimeError):
-    """Internal cooperative-cancellation signal raised at a progress boundary."""
 
 
 @dataclass(frozen=True)
@@ -39,7 +35,6 @@ class PipelineEvent:
 class PipelineJobSnapshot:
     stage: str | None
     status: str
-    username: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     result: dict[str, Any] | None = None
@@ -74,7 +69,6 @@ class PipelineManager:
         self._events: deque[PipelineEvent] = deque(maxlen=event_history_size)
         self._sequence = 0
         self._snapshot = PipelineJobSnapshot(stage=None, status="idle")
-        self._cancel_requested = False
 
     def snapshot(self) -> PipelineJobSnapshot:
         with self._lock:
@@ -95,126 +89,59 @@ class PipelineManager:
             self._events.append(event)
             return event
 
-    def _settings_for(
-        self,
-        base_settings: Settings,
-        stage: str,
-        options: dict[str, object],
-    ) -> Settings:
+    def _settings_for(self, stage: str, options: dict[str, object]) -> Settings:
         if stage != "analyze" or options.get("depth") is None:
-            return base_settings
+            return self.settings
         depth = int(options["depth"])
         if depth <= 0:
             raise ValueError("Analyze depth must be greater than zero")
-        return replace(base_settings, stockfish_depth=depth)
+        return replace(self.settings, stockfish_depth=depth)
 
     def start(
         self,
         stage: str,
         options: dict[str, object] | None = None,
-        *,
-        settings: Settings | None = None,
     ) -> PipelineJobSnapshot:
-        if stage == "stop":
-            return self.stop()
         if stage not in PIPELINE_STAGES or stage not in self._runners:
             raise UnknownPipelineStageError(f"Unknown pipeline stage: {stage}")
         resolved_options = options or {}
-        run_settings = self._settings_for(settings or self.settings, stage, resolved_options)
+        run_settings = self._settings_for(stage, resolved_options)
         with self._lock:
-            if self._snapshot.status in {"running", "stopping"}:
+            if self._snapshot.status == "running":
                 raise PipelineBusyError(
                     f"Pipeline job '{self._snapshot.stage}' is already running"
                 )
-            self._cancel_requested = False
             started_at = datetime.now(UTC)
             self._snapshot = PipelineJobSnapshot(
                 stage=stage,
                 status="running",
-                username=run_settings.username,
                 started_at=started_at,
             )
             self._record_event(
                 {
                     "stage": stage,
                     "status": "running",
-                    "username": run_settings.username,
                     "started_at": started_at.isoformat(),
                 }
             )
             self._executor.submit(self._run, stage, run_settings)
             return self._snapshot
 
-    def stop(self) -> PipelineJobSnapshot:
-        with self._lock:
-            if self._snapshot.status == "stopping":
-                return self._snapshot
-            if self._snapshot.status != "running":
-                raise PipelineBusyError("No pipeline job is currently running")
-            if self._snapshot.stage != "analyze":
-                raise ValueError("Only Stockfish analysis can be stopped safely")
-            self._cancel_requested = True
-            self._snapshot = replace(self._snapshot, status="stopping")
-            self._record_event(
-                {
-                    "stage": self._snapshot.stage or "analyze",
-                    "status": "stopping",
-                    "username": self._snapshot.username or "",
-                }
-            )
-            return self._snapshot
-
-    def _finish_cancelled(self, stage: str, started_at: datetime | None, username: str) -> None:
-        finished_at = datetime.now(UTC)
-        with self._lock:
-            self._snapshot = PipelineJobSnapshot(
-                stage=stage,
-                status="cancelled",
-                username=username,
-                started_at=started_at,
-                finished_at=finished_at,
-            )
-            self._record_event(
-                {
-                    "stage": stage,
-                    "status": "cancelled",
-                    "username": username,
-                    "finished_at": finished_at.isoformat(),
-                }
-            )
-            self._cancel_requested = False
-
     def _run(self, stage: str, run_settings: Settings) -> None:
         runner = self._runners[stage]
-        started_at = self.snapshot().started_at
 
         def progress(payload: dict[str, object]) -> None:
-            with self._lock:
-                cancel_requested = self._cancel_requested
-            self._record_event(
-                {
-                    "stage": stage,
-                    "status": "stopping" if cancel_requested else "running",
-                    "username": run_settings.username,
-                    **payload,
-                }
-            )
-            if cancel_requested:
-                raise PipelineCancelled("Pipeline cancellation requested")
+            self._record_event({"stage": stage, "status": "running", **payload})
 
         try:
             result = runner(run_settings, progress)
-        except PipelineCancelled:
-            self._finish_cancelled(stage, started_at, run_settings.username)
-            return
         except Exception as exc:  # noqa: BLE001 - worker boundary must capture job failures.
             finished_at = datetime.now(UTC)
             with self._lock:
                 self._snapshot = PipelineJobSnapshot(
                     stage=stage,
                     status="failed",
-                    username=run_settings.username,
-                    started_at=started_at,
+                    started_at=self._snapshot.started_at,
                     finished_at=finished_at,
                     error=str(exc),
                 )
@@ -222,18 +149,10 @@ class PipelineManager:
                     {
                         "stage": stage,
                         "status": "failed",
-                        "username": run_settings.username,
                         "error": str(exc),
                         "finished_at": finished_at.isoformat(),
                     }
                 )
-                self._cancel_requested = False
-            return
-
-        with self._lock:
-            cancel_requested = self._cancel_requested
-        if cancel_requested:
-            self._finish_cancelled(stage, started_at, run_settings.username)
             return
 
         finished_at = datetime.now(UTC)
@@ -241,8 +160,7 @@ class PipelineManager:
             self._snapshot = PipelineJobSnapshot(
                 stage=stage,
                 status="succeeded",
-                username=run_settings.username,
-                started_at=started_at,
+                started_at=self._snapshot.started_at,
                 finished_at=finished_at,
                 result=result,
             )
@@ -250,7 +168,6 @@ class PipelineManager:
                 {
                     "stage": stage,
                     "status": "succeeded",
-                    "username": run_settings.username,
                     "result": result,
                     "finished_at": finished_at.isoformat(),
                 }
