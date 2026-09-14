@@ -36,7 +36,7 @@ For an adaptive puzzle:
 
 The service uses a hybrid strategy.
 
-- If the user's move matches the current cached/principal-variation move, accept it without a comparison search.
+- If the user's move matches the current principal-variation move, accept it without a separate candidate-comparison search.
 - If the user deviates from the expected line, evaluate the candidate and compare it with the engine's best continuation.
 - Accept alternatives whose evaluation is within **30 centipawns** of the best move in ordinary positions.
 - In forced-mate positions, a move is accepted only if it preserves a winning mate for the training side. A materially shorter mate may be accepted; a move that loses the forced mate is not.
@@ -60,19 +60,20 @@ This keeps puzzle mastery strict: "recognized the idea but failed to convert" do
 The sequence ends successfully when any of the following becomes true:
 
 - checkmate, stalemate, draw, or another terminal game state;
-- the original tactic/material gain has resolved and the position is no longer forcing;
-- the evaluation advantage has stabilized after the tactical sequence;
-- the engine line becomes quiet enough that further play would be general game play rather than training the original mistake;
 - the user has made **4 accepted decisions**;
-- the sequence reaches a hard cap of **8 plies** from the starting position.
+- the sequence reaches a hard cap of **8 plies** from the starting position;
+- after at least **2 accepted user decisions**, the continuation has become quiet and the evaluation has stabilized.
 
-The first implementation should use deterministic, conservative stop rules rather than a machine-learned stopping model.
+The V1 quiet/stable rule is deterministic:
 
-A practical V1 heuristic is:
+1. After the engine reply, analyze the new user-to-move position.
+2. If the engine reports a forced mate, continue unless a hard cap/terminal state has already ended the drill.
+3. Inspect the first move of the new principal variation. The position is **forcing** when that move gives check, is a capture, or is a promotion.
+4. Compare the current best evaluation with the previous user-turn best evaluation.
+5. If the next best move is non-forcing **and** the absolute evaluation change is at most **30 centipawns**, stop successfully.
+6. Otherwise continue until another stop condition applies.
 
-- always continue after an accepted user move if the position is forcing (check, capture sequence, promotion threat, forced mate) and the cap has not been reached;
-- otherwise continue while the best line still shows a significant tactical swing/material conversion;
-- stop once the position is quiet after at least two user decisions, or when the hard cap is reached.
+This deliberately favors slightly longer drills over prematurely ending unresolved tactics.
 
 ## Architecture
 
@@ -83,7 +84,7 @@ Responsibilities:
 - create/resume adaptive practice sessions;
 - validate current-session ownership and puzzle state;
 - validate legal user moves;
-- reuse a cached current principal variation when possible;
+- reuse the current principal variation when possible;
 - invoke Stockfish when a candidate deviates or when a fresh reply/stop decision is required;
 - compare user move quality against the best move;
 - select and apply the opponent's strongest reply;
@@ -95,19 +96,19 @@ Responsibilities:
 The service depends on:
 
 - `TrainingStore` for puzzle/review persistence;
-- `python-chess` for legality, FEN/SAN conversion, terminal-state detection, checks/captures and board facts;
+- `python-chess` for legality, FEN/SAN conversion, terminal-state detection and forcing-move classification;
 - the existing Stockfish resolution/adapter infrastructure for engine analysis.
 
 The full-game analysis pipeline and `analysis.parquet` remain unchanged. Adaptive practice must not acquire or mutate the full-game analysis lock.
 
 ## Engine lifecycle
 
-Use one Stockfish process per active adaptive session when the session is being actively handled by the application process.
+Use one Stockfish process per active adaptive session while that session is live in the application process.
 
 - The process is opened lazily when engine analysis is first needed.
 - It is reused for the session's continuation decisions.
 - It is closed when the session reaches a terminal state, is abandoned, expires, or application cleanup occurs.
-- Persisted session state is authoritative. If the browser refreshes or the server restarts, the session can resume by starting a new Stockfish process from the persisted `current_fen`.
+- Persisted session state is authoritative. If the browser refreshes or the server restarts, the session can resume by starting a new Stockfish process from persisted state.
 
 No engine process identity is persisted.
 
@@ -131,10 +132,15 @@ Fields:
 - `current_ply INTEGER NOT NULL DEFAULT 0`
 - `engine_depth INTEGER NOT NULL`
 - `max_eval_loss_cp INTEGER NOT NULL DEFAULT 0`
+- `previous_best_eval_cp INTEGER`
+- `review_recorded INTEGER NOT NULL DEFAULT 0`
+- `review_id INTEGER`
 - `started_at TEXT NOT NULL`
 - `updated_at TEXT NOT NULL`
 - `finished_at TEXT`
 - foreign key to `puzzles(puzzle_id)`
+
+`review_recorded` is the durable idempotency guard. Terminal-session finalization and review creation occur in one SQLite transaction; a repeated terminal request returns the stored terminal state and never creates a second review.
 
 Only one active adaptive session per puzzle/player is needed in V1. Starting the same due puzzle should resume its active session rather than create duplicates.
 
@@ -162,13 +168,13 @@ Existing `reviews` remains the spaced-repetition source of truth. Adaptive sessi
 
 ## Review finalization
 
-`TrainingStore.record_review(...)` is called once when the adaptive session reaches `succeeded` or `failed`.
+`TrainingStore.record_review(...)` semantics are reused, but adaptive finalization must execute transactionally with the session's `review_recorded` update.
 
 - `succeeded` -> `correct=True`
 - `failed` -> `correct=False`
 - `abandoned` -> no review in V1
 
-The `answer` field in the review stores a compact sequence marker such as the first user move UCI or a serialized adaptive result identifier; detailed move history remains in `practice_session_steps`.
+The existing review `answer` stores the first submitted user move UCI for compatibility. Detailed move history remains in `practice_session_steps`.
 
 Finalization must be idempotent. Repeating the final API request must not create a second review.
 
@@ -252,7 +258,7 @@ Add aggregate adaptive metrics without changing the definition of existing puzzl
 
 - adaptive sessions completed;
 - adaptive success rate;
-- continuation move accuracy (`accepted user continuation moves / attempted continuation moves`);
+- continuation move accuracy, excluding the first user move;
 - average accepted user decisions per completed adaptive session;
 - average calculation depth in plies.
 
@@ -264,7 +270,7 @@ Existing `Mastered` remains based on consecutive correct spaced-repetition revie
 - Session belongs to an inactive/missing puzzle -> 409 and session cannot continue.
 - Move illegal in `current_fen` -> 422, no session mutation.
 - Move submitted after terminal session -> return terminal session state idempotently; do not create another review.
-- Stockfish unavailable before any adaptive evaluation -> actionable 409/503-style UI error and leave session active/unmodified.
+- Stockfish unavailable before any adaptive evaluation -> actionable service/UI error and leave session active/unmodified.
 - Stockfish crashes mid-session -> close/recreate once using the existing retry philosophy; if still unavailable, return an error without recording failure against the user.
 - Browser refresh/network retry -> persisted session + idempotent finalization prevent duplicate reviews.
 
@@ -272,7 +278,7 @@ Existing `Mastered` remains based on consecutive correct spaced-repetition revie
 
 Per-player practice sessions and pipeline jobs are independent, but Stockfish resource use should remain bounded.
 
-V1 supports one active adaptive engine operation per session request. The service serializes mutation of a given session so two simultaneous move submissions cannot both advance it.
+V1 serializes mutation of a given `session_id` so two simultaneous move submissions cannot both advance it. Database finalization is transactional and guarded by `review_recorded`.
 
 Do not weaken the full-game analyzer's existing single-writer lock.
 
@@ -295,9 +301,10 @@ Do not weaken the full-game analyzer's existing single-writer lock.
 - forced mate must be preserved;
 - illegal move does not mutate session;
 - engine reply advances `current_fen` correctly;
-- quiet/terminal/cap stop rules;
+- deterministic quiet/stable stop rule;
+- terminal and hard-cap stop rules;
 - session resume from persisted FEN;
-- final review written exactly once;
+- final review written exactly once under retry;
 - abandoned session writes no review;
 - engine failure does not penalize the user;
 - Quick-mode review behavior remains unchanged.
