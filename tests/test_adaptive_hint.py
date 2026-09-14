@@ -24,7 +24,7 @@ def _position(*moves: str) -> chess.Board:
 
 def _info(cp: int, *pv: str) -> dict:
     return {
-        "score": chess.engine.PovScore(score, chess.WHITE),
+        "score": chess.engine.PovScore(chess.engine.Cp(cp), chess.WHITE),
         "pv": [chess.Move.from_uci(move) for move in pv],
     }
 
