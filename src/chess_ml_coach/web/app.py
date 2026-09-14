@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
+from .adaptive_routes import AdaptiveServiceRegistry, router as adaptive_router
 from .explanation_routes import router as explanation_router
 from .pipeline import (
     TERMINAL_STATUSES,
@@ -115,12 +116,16 @@ def create_app(
     settings: Settings | None = None,
     *,
     pipeline_manager: PipelineManager | None = None,
+    adaptive_services: AdaptiveServiceRegistry | None = None,
 ) -> FastAPI:
     initial = settings or Settings()
     manager = pipeline_manager or PipelineManager(initial)
+    adaptive = adaptive_services or AdaptiveServiceRegistry()
     app = FastAPI(title="Chess ML Coach", version=APP_VERSION)
     app.state.settings = initial
     app.state.pipeline_manager = manager
+    app.state.adaptive_services = adaptive
+    app.add_event_handler("shutdown", adaptive.close_all)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -129,6 +134,7 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.include_router(explanation_router)
+    app.include_router(adaptive_router)
 
     def current() -> Settings:
         return app.state.settings
