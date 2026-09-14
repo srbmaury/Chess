@@ -42,6 +42,19 @@ def _seed(puzzle_id: str) -> PuzzleSeed:
     )
 
 
+def test_fresh_web_install_has_no_active_player_until_user_selects_one(tmp_path: Path):
+    root = _root_settings(tmp_path)
+    app = create_app(root)
+    enable_profiles(app, root)
+    client = TestClient(app)
+
+    listed = client.get("/api/profiles")
+
+    assert listed.status_code == 200
+    assert listed.json()["active_username"] is None
+    assert listed.json()["profiles"] == []
+
+
 def test_profile_api_creates_and_switches_active_player(tmp_path: Path):
     root = _root_settings(tmp_path)
     profiles = ProfileManager(root)

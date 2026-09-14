@@ -338,10 +338,15 @@ def ui(
 
     from .web.serve import create_served_app
 
+    # The browser needs root storage so a fresh community install can ask for a
+    # player before creating any profile. An explicit --username selects the
+    # initial player but does not change who owns any legacy workspace.
     settings = _execute(
-        lambda: get_settings(username, data_dir=data_dir, model_dir=model_dir)
+        lambda: _get_root_settings(None, data_dir=data_dir, model_dir=model_dir)
     )
-    web_app = _execute(lambda: create_served_app(settings))
+    web_app = _execute(
+        lambda: create_served_app(settings, initial_username=username)
+    )
     url = f"http://{host}:{port}"
     typer.echo(f"Chess ML Coach UI -> {url}")
     if open_browser:

@@ -19,6 +19,7 @@ def create_served_app(
     settings: Settings | None = None,
     *,
     static_dir: Path | None = None,
+    initial_username: str | None = None,
 ):
     dist = Path(static_dir) if static_dir is not None else default_frontend_dist()
     index_path = dist / "index.html"
@@ -29,7 +30,7 @@ def create_served_app(
 
     resolved = settings or Settings()
     app = create_app(resolved)
-    enable_profiles(app, resolved)
+    enable_profiles(app, resolved, initial_username=initial_username)
     assets = dist / "assets"
     if assets.exists():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")

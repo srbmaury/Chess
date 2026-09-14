@@ -38,6 +38,7 @@ const api = {
   puzzles: (query = '') => request<{ items: PuzzleItem[]; total: number; limit: number; offset: number }>(`/api/puzzles${query}`),
   pipelineStatus: () => request<Record<string, unknown>>('/api/pipeline/status'),
   startPipeline: (stage: string, options?: Record<string, unknown>) => request<Record<string, unknown>>(`/api/pipeline/${stage}`, { method: 'POST', body: JSON.stringify(options || {}) }),
+  stopPipeline: () => request<Record<string, unknown>>('/api/pipeline/stop', { method: 'POST' }),
 }
 
 const percentage = (value: number | null) => value == null ? '—' : `${(value * 100).toFixed(1)}%`
@@ -141,10 +142,38 @@ function PipelinePage() {
   const [depth, setDepth] = useState(14)
   const [error, setError] = useState('')
   const refresh = useCallback(() => api.pipelineStatus().then(setStatus).catch((x: Error) => setError(x.message)), [])
-  useEffect(() => { refresh(); const stream = new EventSource('/api/pipeline/events'); stream.onmessage = (event) => { const progress = JSON.parse(event.data); setStatus((old) => ({ ...old, progress })) }; return () => stream.close() }, [refresh])
-  async function start(stage: string) { try { setError(''); setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined)); window.setTimeout(refresh, 250) } catch (x) { setError((x as Error).message) } }
-  const running = status?.status === 'running'
-  return <section><Heading kicker="PIPELINE" title="Build your coach" copy="Run expensive operations here and watch them progress." />{error && <ErrorBox message={error} />}<div className="list">{['sync', 'analyze', 'features', 'puzzles', 'train', 'report'].map((stage) => <article className="stage" key={stage}><div><strong>{stage[0].toUpperCase() + stage.slice(1)}</strong><small>{stage === 'analyze' ? 'Stockfish evaluation' : stage === 'train' ? 'Personalized LightGBM model' : 'Pipeline stage'}</small></div>{stage === 'analyze' && <input aria-label="Stockfish depth" type="number" min={1} value={depth} onChange={(event) => setDepth(Number(event.target.value))} />}<button disabled={running} onClick={() => start(stage)}>{running && status?.stage === stage ? 'Running…' : 'Run'}</button></article>)}</div>{status?.progress && <div className="panel"><h2>Live progress</h2><div className="progress-grid">{Object.entries(status.progress).filter(([key]) => !['created_at', 'sequence', 'stage'].includes(key)).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><b>{String(value)}</b></div>)}</div></div>}</section>
+  useEffect(() => {
+    refresh()
+    const stream = new EventSource('/api/pipeline/events')
+    stream.onmessage = (event) => {
+      const progress = JSON.parse(event.data)
+      setStatus((old) => ({ ...old, ...progress, progress }))
+    }
+    return () => stream.close()
+  }, [refresh])
+
+  async function start(stage: string) {
+    try {
+      setError('')
+      setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined))
+      window.setTimeout(refresh, 250)
+    } catch (x) {
+      setError((x as Error).message)
+    }
+  }
+
+  async function stop() {
+    try {
+      setError('')
+      setStatus(await api.stopPipeline())
+    } catch (x) {
+      setError((x as Error).message)
+    }
+  }
+
+  const active = ['running', 'stopping'].includes(status?.status)
+  const analyzeActive = active && status?.stage === 'analyze'
+  return <section><Heading kicker="PIPELINE" title="Build your coach" copy="Run expensive operations here and watch them progress." />{error && <ErrorBox message={error} />}<div className="list">{['sync', 'analyze', 'features', 'puzzles', 'train', 'report'].map((stage) => <article className="stage" key={stage}><div><strong>{stage[0].toUpperCase() + stage.slice(1)}</strong><small>{stage === 'analyze' ? 'Stockfish evaluation' : stage === 'train' ? 'Personalized LightGBM model' : 'Pipeline stage'}</small></div>{stage === 'analyze' && <input aria-label="Stockfish depth" type="number" min={1} value={depth} disabled={analyzeActive} onChange={(event) => setDepth(Number(event.target.value))} />}{stage === 'analyze' && analyzeActive ? <button className="ghost" disabled={status?.status === 'stopping'} onClick={() => { void stop() }}>{status?.status === 'stopping' ? 'Stopping…' : 'Stop'}</button> : <button disabled={active} onClick={() => { void start(stage) }}>{active && status?.stage === stage ? 'Running…' : 'Run'}</button>}</article>)}</div>{status?.progress && <div className="panel"><h2>Live progress</h2><div className="progress-grid">{Object.entries(status.progress).filter(([key]) => !['created_at', 'sequence', 'stage'].includes(key)).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><b>{String(value)}</b></div>)}</div></div>}</section>
 }
 
 export default function App() { return <BrowserRouter><Shell /></BrowserRouter> }
