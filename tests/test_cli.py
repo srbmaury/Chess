@@ -83,7 +83,7 @@ def test_sync_command_uses_default_username_and_data_dir(monkeypatch, tmp_path: 
     result = runner.invoke(app, ["sync", "--data-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert seen["settings"].username == "srbmaury"
-    assert seen["settings"].data_dir == tmp_path
+    assert seen["settings"].data_dir == tmp_path / "users" / "srbmaury"
     assert "[sync] 1/2" in result.stdout
     assert "10 games" in result.stdout
     assert "3 new games" in result.stdout
@@ -172,7 +172,7 @@ def test_puzzles_requires_feature_dataset(tmp_path: Path):
 
 
 def test_practice_accepts_correct_san_and_records_review(tmp_path: Path):
-    db_path = tmp_path / "training" / "training.db"
+    db_path = tmp_path / "users" / "srbmaury" / "training" / "training.db"
     store = TrainingStore(db_path)
     store.upsert_puzzles(
         [_training_seed()],
@@ -195,7 +195,7 @@ def test_practice_accepts_correct_san_and_records_review(tmp_path: Path):
 
 
 def test_practice_q_exits_without_recording_review(tmp_path: Path):
-    db_path = tmp_path / "training" / "training.db"
+    db_path = tmp_path / "users" / "srbmaury" / "training" / "training.db"
     store = TrainingStore(db_path)
     store.upsert_puzzles(
         [_training_seed()],
