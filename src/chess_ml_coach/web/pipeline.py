@@ -115,6 +115,8 @@ class PipelineManager:
         *,
         settings: Settings | None = None,
     ) -> PipelineJobSnapshot:
+        if stage == "stop":
+            return self.stop()
         if stage not in PIPELINE_STAGES or stage not in self._runners:
             raise UnknownPipelineStageError(f"Unknown pipeline stage: {stage}")
         resolved_options = options or {}
