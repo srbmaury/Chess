@@ -196,14 +196,18 @@ class PipelineManager:
         runner = self._runners[stage]
 
         def progress(payload: dict[str, object]) -> None:
+            progress_payload = dict(payload)
+            reported_stage = progress_payload.pop("stage", None)
+            if reported_stage is not None and reported_stage != stage:
+                progress_payload["phase"] = reported_stage
             with self._lock:
                 cancel_requested = self._cancel_requested
                 self._record_event(
                     {
+                        **progress_payload,
                         "stage": stage,
                         "status": "stopping" if cancel_requested else "running",
                         "username": run_settings.username,
-                        **payload,
                     }
                 )
             if cancel_requested:
