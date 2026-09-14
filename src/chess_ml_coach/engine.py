@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 from collections.abc import Callable, Iterator
@@ -15,6 +14,7 @@ import chess.engine
 import pandas as pd
 
 from .config import MoveQualityThresholds, Settings
+from .locking import ProfileBusyError, exclusive_profile_lock
 
 MATE_CP = 100_000
 MATE_REANALYZE_THRESHOLD = 50_000
@@ -116,22 +116,23 @@ def _resolve_stockfish(path: str | None) -> str:
 
 
 @contextmanager
-def _analysis_lock(output_path: Path) -> Iterator[None]:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = output_path.with_suffix(".lock")
+def _analysis_lock(
+    output_path: Path,
+    profile_lock_path: Path | None = None,
+) -> Iterator[None]:
+    lock_path = profile_lock_path or output_path.with_suffix(".lock")
+
+    def busy_message(path: Path) -> str:
+        return (
+            f"Analysis is already running for {output_path}, or another profile "
+            f"operation holds {path}. If no operation is running, remove the stale lock."
+        )
+
     try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise EngineConfigurationError(
-            f"Analysis is already running for {output_path}. "
-            f"If no analyzer is running, remove stale lock file {lock_path}."
-        ) from exc
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(str(os.getpid()))
-        yield
-    finally:
-        lock_path.unlink(missing_ok=True)
+        with exclusive_profile_lock(lock_path, error_message=busy_message):
+            yield
+    except ProfileBusyError as exc:
+        raise EngineConfigurationError(str(exc)) from exc
 
 
 def _write_analysis(frame: pd.DataFrame, output_path: Path) -> None:
@@ -379,7 +380,7 @@ def analyze_user_moves(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> pd.DataFrame:
-    with _analysis_lock(output_path):
+    with _analysis_lock(output_path, settings.profile_lock_path):
         return _analyze_user_moves_unlocked(
             moves,
             settings,

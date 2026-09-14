@@ -139,6 +139,27 @@ The active profile is recorded locally in `data/profiles.json`. Usernames are va
 
 A second repository clone is **not required** to test another Chess.com account. Use **Add player** / **Switch player** in the UI, or pass `--username` to CLI commands.
 
+### Permanently delete a player's local data
+
+Stop the web UI and any pipeline work first. Then delete one player's raw games,
+processed datasets, Stockfish cache, puzzle/review/explanation history, trained
+model, and local profile metadata:
+
+```bash
+chess-coach delete-user-data --username alice
+```
+
+The interactive command requires typing the canonical username exactly. For
+non-interactive local scripts, explicitly bypass the prompt:
+
+```bash
+chess-coach delete-user-data --username alice --yes
+```
+
+Deletion is limited to that username's isolated directories. It refuses unknown
+profiles and profiles with an active Stockfish analysis lock. This removes only
+Chess ML Coach's local copies; it does not delete public games from Chess.com.
+
 ### Existing single-user installations
 
 Older versions stored artifacts directly under:

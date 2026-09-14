@@ -19,6 +19,7 @@ class Settings:
     username: str = "srbmaury"
     data_dir: Path = Path("data")
     model_dir: Path = Path("models")
+    profile_lock_path: Path | None = None
     stockfish_path: str | None = None
     stockfish_depth: int = 14
     min_group_size: int = 10

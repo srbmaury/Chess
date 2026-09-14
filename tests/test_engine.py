@@ -246,3 +246,22 @@ def test_legacy_mate_rows_are_reanalyzed_under_new_scoring(tmp_path: Path):
 
     assert engine.calls == 2
     assert result.iloc[0].scoring_version == 2
+
+
+def test_analysis_respects_external_profile_operation_lock(tmp_path: Path):
+    moves = _single_user_move()
+    output = tmp_path / "data" / "engine" / "analysis.parquet"
+    profile_lock = tmp_path / "data-root" / ".profile-locks" / "alice.lock"
+    profile_lock.parent.mkdir(parents=True, exist_ok=True)
+    profile_lock.write_text("delete", encoding="utf-8")
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        model_dir=tmp_path / "models",
+        profile_lock_path=profile_lock,
+    )
+
+    with pytest.raises(EngineConfigurationError, match="another profile operation"):
+        analyze_user_moves(moves, settings, output, adapter=FakeEngine())
+
+    assert profile_lock.exists()
+    assert not output.exists()
