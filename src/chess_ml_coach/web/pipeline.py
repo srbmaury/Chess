@@ -85,14 +85,15 @@ class PipelineManager:
             return [event for event in self._events if event.sequence > after_sequence]
 
     def _record_event(self, payload: dict[str, object]) -> PipelineEvent:
-        self._sequence += 1
-        event = PipelineEvent(
-            sequence=self._sequence,
-            payload=dict(payload),
-            created_at=datetime.now(UTC),
-        )
-        self._events.append(event)
-        return event
+        with self._lock:
+            self._sequence += 1
+            event = PipelineEvent(
+                sequence=self._sequence,
+                payload=dict(payload),
+                created_at=datetime.now(UTC),
+            )
+            self._events.append(event)
+            return event
 
     def _settings_for(
         self,
