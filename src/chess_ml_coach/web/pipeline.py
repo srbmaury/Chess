@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import RLock
 from typing import Any
 
@@ -14,6 +15,58 @@ from ..config import Settings
 PipelineRunner = Callable[[Settings, services.ProgressCallback], dict[str, Any]]
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 PIPELINE_STAGES = ("sync", "analyze", "features", "puzzles", "train", "report")
+
+_PROGRESS_KEYS = {
+    "sync": {
+        "current": "current_month",
+        "total": "total_months",
+        "game_count": "games_synced",
+        "skipped": "archive_skipped",
+    },
+    "analyze": {
+        "completed": "completed_moves",
+        "total": "total_user_moves",
+        "reused": "reused_analyses",
+        "analyzed": "newly_analyzed_moves",
+    },
+    "puzzles": {
+        "current": "processed_feature_rows",
+        "total": "total_feature_rows",
+        "eligible": "eligible_puzzles",
+    },
+}
+
+_RESULT_KEYS = {
+    "sync": {
+        "downloaded": "downloaded_games",
+        "total": "total_games",
+        "pgn_path": "pgn_file",
+    },
+    "analyze": {
+        "rows": "analyzed_moves",
+        "output": "analysis_file",
+    },
+    "features": {
+        "rows": "feature_rows",
+        "output": "features_file",
+    },
+    "puzzles": {
+        "source_rows": "source_feature_rows",
+        "eligible": "eligible_puzzles",
+        "skipped": "skipped_feature_rows",
+        "inserted": "inserted_puzzles",
+        "updated": "updated_puzzles",
+        "total": "total_puzzles",
+        "db_path": "training_db",
+    },
+    "train": {
+        "model_path": "model_file",
+        "metadata_path": "metadata_file",
+    },
+    "report": {
+        "output": "report_file",
+    },
+}
 
 
 class PipelineBusyError(RuntimeError):
@@ -55,6 +108,57 @@ def _default_runners() -> dict[str, PipelineRunner]:
         "train": lambda settings, progress: services.run_train(settings, progress=progress),
         "report": lambda settings, progress: services.run_report(settings),
     }
+
+
+def _display_scalar(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _flatten_mapping(prefix: str, value: Mapping[str, object]) -> dict[str, object]:
+    flattened: dict[str, object] = {}
+    for key, item in value.items():
+        next_key = f"{prefix}_{key}" if prefix else str(key)
+        if isinstance(item, Mapping):
+            flattened.update(_flatten_mapping(next_key, item))
+        elif isinstance(item, (list, tuple, set)):
+            flattened[next_key] = ", ".join(str(part) for part in item)
+        else:
+            flattened[next_key] = _display_scalar(item)
+    return flattened
+
+
+def _display_progress(stage: str, payload: dict[str, object]) -> dict[str, object]:
+    progress_payload = dict(payload)
+    reported_stage = progress_payload.pop("stage", None)
+    if reported_stage is not None and reported_stage != stage:
+        progress_payload["phase"] = reported_stage
+
+    if stage == "sync" and isinstance(progress_payload.get("archive"), str):
+        archive = str(progress_payload.pop("archive"))
+        parts = [part for part in archive.rstrip("/").split("/") if part]
+        progress_payload["archive_month"] = "-".join(parts[-2:]) if len(parts) >= 2 else archive
+
+    aliases = _PROGRESS_KEYS.get(stage, {})
+    return {
+        aliases.get(key, key): _display_scalar(value)
+        for key, value in progress_payload.items()
+    }
+
+
+def _display_result(stage: str, result: dict[str, Any]) -> dict[str, object]:
+    aliases = _RESULT_KEYS.get(stage, {})
+    normalized: dict[str, object] = {}
+    for key, value in result.items():
+        display_key = aliases.get(key, key)
+        if isinstance(value, Mapping):
+            normalized.update(_flatten_mapping(display_key, value))
+        elif isinstance(value, (list, tuple, set)):
+            normalized[display_key] = ", ".join(str(part) for part in value)
+        else:
+            normalized[display_key] = _display_scalar(value)
+    return normalized
 
 
 class PipelineManager:
@@ -196,10 +300,7 @@ class PipelineManager:
         runner = self._runners[stage]
 
         def progress(payload: dict[str, object]) -> None:
-            progress_payload = dict(payload)
-            reported_stage = progress_payload.pop("stage", None)
-            if reported_stage is not None and reported_stage != stage:
-                progress_payload["phase"] = reported_stage
+            progress_payload = _display_progress(stage, payload)
             with self._lock:
                 cancel_requested = self._cancel_requested
                 self._record_event(
@@ -259,10 +360,10 @@ class PipelineManager:
             )
             self._record_event(
                 {
+                    **_display_result(stage, result),
                     "stage": stage,
                     "status": "succeeded",
                     "username": run_settings.username,
-                    "result": result,
                     "finished_at": finished_at.isoformat(),
                 }
             )
