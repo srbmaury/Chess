@@ -37,13 +37,20 @@ def score_snapshot(
     ply: int = 30,
 ) -> ScoreSnapshot:
     relative = score.pov(user_color)
-    mate = relative.mate()
-    cp = None if mate is not None else relative.score()
-    return ScoreSnapshot(
-        cp=int(cp) if cp is not None else None,
-        mate=int(mate) if mate is not None else None,
-        expected_score=_expected_score(relative, ply=ply),
-    )
+    raw_mate = relative.mate()
+    if raw_mate is None:
+        cp = relative.score()
+        return ScoreSnapshot(
+            cp=int(cp) if cp is not None else 0,
+            mate=None,
+            expected_score=_expected_score(relative, ply=ply),
+        )
+
+    normalized = int(relative.score(mate_score=MATE_CP) or 0)
+    distance = abs(int(raw_mate))
+    signed_mate = distance if normalized >= 0 else -distance
+    expected = 1.0 if normalized > 0 else 0.0 if normalized < 0 else _expected_score(relative, ply=ply)
+    return ScoreSnapshot(cp=None, mate=signed_mate, expected_score=expected)
 
 
 def snapshot_from_normalized_cp(value: int, *, ply: int = 30) -> ScoreSnapshot:
@@ -106,6 +113,26 @@ def classify_move_quality(
     if cpl <= 30 and expected_drop <= 0.02:
         return MoveAssessment("excellent", "near-best move")
     return MoveAssessment("good", "outcome essentially preserved")
+
+
+def stored_quality_reason(label: str, cpl: int) -> str:
+    normalized = str(label).strip().lower()
+    mate_related = abs(int(cpl)) >= MATE_THRESHOLD_CP
+    if normalized == "miss":
+        return "forced mate was available" if mate_related else "decisive winning chance was missed"
+    if normalized == "blunder":
+        return "allows forced mate" if mate_related else "large drop in expected score"
+    if normalized == "mistake":
+        return "significant drop in expected score"
+    if normalized == "inaccuracy":
+        return "noticeable drop in expected score"
+    if normalized == "excellent":
+        return "near-best move"
+    if normalized == "best":
+        return "engine top move"
+    if normalized == "brilliant":
+        return "sound sacrifice and uniquely strong move"
+    return "outcome essentially preserved" if normalized == "good" else ""
 
 
 def display_loss_pawns(cpl: int, reason: str = "") -> float | None:
