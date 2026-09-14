@@ -178,3 +178,20 @@ def test_delete_profile_unlinks_profile_symlink_without_following_it(tmp_path: P
 
     assert not alice.data_dir.exists()
     assert secret.read_text(encoding="utf-8") == "keep"
+
+
+def test_delete_profile_refuses_while_analysis_is_running(tmp_path: Path):
+    root = _root(tmp_path)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    alice = manager.settings_for("alice")
+    lock = alice.data_dir / "engine" / "analysis.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("12345", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="analysis is running"):
+        manager.delete_profile("alice")
+
+    assert alice.data_dir.exists()
+    assert alice.model_dir.exists()
+    assert manager.active_username() == "alice"
