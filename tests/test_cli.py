@@ -168,7 +168,7 @@ def test_puzzles_requires_feature_dataset(tmp_path: Path):
 
     assert result.exit_code == 1
     assert "features" in result.output.lower()
-    assert "chess-coach features" in result.output
+    assert "Run Features first" in result.output
 
 
 def test_practice_accepts_correct_san_and_records_review(tmp_path: Path):
