@@ -146,6 +146,14 @@ class ProgressGroupRow(BaseModel):
     accuracy: float | None
 
 
+class AdaptiveProgressSummary(BaseModel):
+    sessions_completed: int
+    success_rate: float | None
+    continuation_accuracy: float | None
+    average_accepted_decisions: float | None
+    average_calculation_depth_plies: float | None
+
+
 class ProgressResponse(BaseModel):
     total_puzzles: int
     due_puzzles: int
@@ -156,6 +164,7 @@ class ProgressResponse(BaseModel):
     by_motif: list[ProgressGroupRow]
     by_opening: list[ProgressGroupRow]
     daily_reviews: list[DailyReviewRow]
+    adaptive: AdaptiveProgressSummary
 
 
 class TrainingSummary(BaseModel):
