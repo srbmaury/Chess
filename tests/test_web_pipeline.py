@@ -51,6 +51,24 @@ def test_manager_records_monotonic_progress_and_success(tmp_path: Path):
     assert any(event.payload.get("completed") == 10 for event in events)
 
 
+def test_manager_preserves_pipeline_stage_and_exposes_runner_phase(tmp_path: Path):
+    def fake_runner(settings, progress):
+        progress({"stage": "split", "message": "Splitting games chronologically"})
+        return {"ok": True}
+
+    manager = PipelineManager(_settings(tmp_path), runners={"train": fake_runner})
+    manager.start("train")
+    assert _wait_for_terminal(manager).status == "succeeded"
+
+    progress_event = next(
+        event.payload
+        for event in manager.events(after_sequence=0)
+        if event.payload.get("message") == "Splitting games chronologically"
+    )
+    assert progress_event["stage"] == "train"
+    assert progress_event["phase"] == "split"
+
+
 def test_manager_rejects_second_job_while_one_is_running(tmp_path: Path):
     release = threading.Event()
 
