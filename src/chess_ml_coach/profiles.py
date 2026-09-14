@@ -192,8 +192,8 @@ class ProfileManager:
         self._assert_storage_paths_are_not_symlinked(
             self.root_settings.data_dir,
             self.root_settings.model_dir,
-            scoped.data_dir,
-            scoped.model_dir,
+            scoped.data_dir.parent,
+            scoped.model_dir.parent,
             scoped.profile_lock_path.parent,
         )
         registry = self._load_registry()
