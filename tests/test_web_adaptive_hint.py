@@ -101,7 +101,7 @@ def test_hint_reveals_only_current_best_move_and_keeps_session_active(tmp_path: 
     assert store.review_count("p1") == 0
 
 
-def test_resumed_session_hides_rejected_guesses_and_hint_steps_from_public_line(tmp_path: Path):
+def test_resumed_session_hides_rejected_guesses_after_hint_from_public_line(tmp_path: Path):
     start = chess.Board(START_FEN)
     after_c4 = start.copy(stack=False)
     after_c4.push_uci("c2c4")
@@ -126,6 +126,6 @@ def test_resumed_session_hides_rejected_guesses_and_hint_steps_from_public_line(
     assert resumed.status_code == 200
     payload = resumed.json()
     assert payload["steps"] == []
-    assert payload["user_moves_attempted"] == 2
+    assert payload["user_moves_attempted"] == 1
     assert payload["user_moves_accepted"] == 0
     assert payload["current_fen"] == START_FEN
