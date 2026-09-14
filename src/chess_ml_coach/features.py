@@ -211,7 +211,7 @@ def build_feature_dataset(
         axis=1,
     )
     frame["engine_eval_before_cp"] = frame["eval_before_cp"]
-    frame["significant_mistake"] = (frame["cpl"] >= thresholds.mistake).astype(int)
+    frame["significant_mistake"] = frame["quality"].isin({"miss", "mistake", "blunder"}).astype(int)
     frame["mistake_cpl_threshold"] = thresholds.mistake
     frame["eco"] = frame["eco"].fillna("unknown")
     frame["opening"] = frame["opening"].fillna("unknown")
