@@ -85,7 +85,8 @@ test('rejected adaptive moves keep the same board retryable without revealing th
   fireEvent.click(screen.getByRole('button', { name: 'Play c4' }))
   await waitFor(() => expect(screen.getByTestId('board-dragging').textContent).toBe('true'))
   expect(screen.getByTestId('board-position').textContent).toBe(START)
-  expect(screen.getByText('Find the strongest move. Strong alternatives are accepted.')).toBeTruthy()
+  expect(screen.getByText('Not quite. Try again — the position stays the same.')).toBeTruthy()
+  expect(screen.queryByText('Line so far')).toBeNull()
 
   fireEvent.click(screen.getByRole('button', { name: 'Play c4' }))
   await waitFor(() => expect(attempts).toBe(2))

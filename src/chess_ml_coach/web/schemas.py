@@ -80,6 +80,18 @@ class AdaptiveMoveRequest(BaseModel):
     move_uci: str = Field(min_length=4, max_length=5)
 
 
+class AdaptiveHintResponse(BaseModel):
+    session_id: str
+    puzzle_id: str
+    status: str
+    move_uci: str
+    move_san: str
+    current_fen: str
+    user_moves_attempted: int
+    user_moves_accepted: int
+    current_ply: int
+
+
 class AdaptiveMoveResponse(BaseModel):
     session_id: str
     puzzle_id: str
@@ -186,4 +198,3 @@ class DashboardResponse(BaseModel):
     analyzed_moves: int
     training: TrainingSummary
     artifacts: dict[str, ArtifactState]
-
