@@ -14,7 +14,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export default function CommunityControls({ onProfileChanged }: { onProfileChanged: () => void }) {
+type Props = {
+  onProfileChanged: () => void
+  onActiveProfileChanged?: (username: string | null) => void
+}
+
+export default function CommunityControls({ onProfileChanged, onActiveProfileChanged }: Props) {
   const [profiles, setProfiles] = useState<ProfileList | null>(null)
   const [username, setUsername] = useState('')
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null)
@@ -24,7 +29,10 @@ export default function CommunityControls({ onProfileChanged }: { onProfileChang
   async function refreshProfiles() {
     try {
       const data = await request<ProfileList>('/api/profiles')
-      if (Array.isArray(data.profiles)) setProfiles(data)
+      if (Array.isArray(data.profiles)) {
+        setProfiles(data)
+        onActiveProfileChanged?.(data.active_username)
+      }
     } catch { /* optional on older/dev API */ }
   }
 
@@ -43,7 +51,9 @@ export default function CommunityControls({ onProfileChanged }: { onProfileChang
     setBusy(true); setError('')
     try {
       const data = await request<ProfileList>(`/api/profiles/${encodeURIComponent(next)}/activate`, { method: 'POST' })
-      setProfiles(data); onProfileChanged()
+      setProfiles(data)
+      onActiveProfileChanged?.(data.active_username)
+      onProfileChanged()
     } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
   }
 
@@ -53,7 +63,9 @@ export default function CommunityControls({ onProfileChanged }: { onProfileChang
     setBusy(true); setError('')
     try {
       await request('/api/profiles', { method: 'POST', body: JSON.stringify({ username: next, activate: true }) })
-      setUsername(''); await refreshProfiles(); onProfileChanged()
+      setUsername('')
+      await refreshProfiles()
+      onProfileChanged()
     } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
   }
 
@@ -64,10 +76,26 @@ export default function CommunityControls({ onProfileChanged }: { onProfileChang
   }
 
   if (!profiles) return null
+
+  if (!profiles.active_username) {
+    return <section style={{maxWidth:560,margin:'12vh auto',padding:'0 20px'}}>
+      <div className="panel">
+        <p className="kicker">GET STARTED</p>
+        <h1>Choose your Chess.com player</h1>
+        <p className="muted">Enter a Chess.com username. Games, analysis, puzzles, and progress stay isolated to that player.</p>
+        <form onSubmit={addPlayer} style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <input aria-label="Chess.com username" autoFocus placeholder="Chess.com username" value={username} disabled={busy} onChange={(event) => setUsername(event.target.value)} />
+          <button type="submit" disabled={busy || !username.trim()}>{busy ? 'Opening…' : 'Continue'}</button>
+        </form>
+        {error && <span style={{color:'#ff9a9a',fontSize:13}}>{error}</span>}
+      </div>
+    </section>
+  }
+
   const analysisActive = pipeline?.stage === 'analyze' && ['running', 'stopping'].includes(pipeline.status || '')
   return <div style={{position:'sticky',top:0,zIndex:30,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',padding:'10px 16px',background:'#171a14',borderBottom:'1px solid #2b3026'}}>
     <strong>Player</strong>
-    <select aria-label="Active Chess.com player" value={profiles.active_username || ''} disabled={busy || analysisActive} onChange={(event) => { void activate(event.target.value) }}>
+    <select aria-label="Active Chess.com player" value={profiles.active_username} disabled={busy || analysisActive} onChange={(event) => { void activate(event.target.value) }}>
       {profiles.profiles.map((profile) => <option key={profile.username} value={profile.username}>{profile.display_username}</option>)}
     </select>
     <form onSubmit={addPlayer} style={{display:'flex',gap:8}}>
