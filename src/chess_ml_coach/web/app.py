@@ -15,7 +15,6 @@ from fastapi.responses import StreamingResponse
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
-from .explanation_routes import router as explanation_router
 from .pipeline import (
     TERMINAL_STATUSES,
     PipelineBusyError,
@@ -128,7 +127,6 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
-    app.include_router(explanation_router)
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
