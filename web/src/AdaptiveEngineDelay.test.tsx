@@ -63,7 +63,7 @@ afterEach(() => {
   window.history.pushState({}, '', '/')
 })
 
-test('computer reply waits briefly after an accepted adaptive move', async () => {
+test('user move appears before the brief computer reply delay', async () => {
   window.history.pushState({}, '', '/practice')
   vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
     const url = String(input)
@@ -101,15 +101,16 @@ test('computer reply waits briefly after an accepted adaptive move', async () =>
     await Promise.resolve()
   })
 
+  const userFen = fenAfter('d2d4')
   const finalFen = fenAfter('d2d4', 'd7d5')
-  expect(screen.getByTestId('board-position').textContent).not.toBe(finalFen)
+  expect(screen.getByTestId('board-position').textContent).toBe(userFen)
   expect(screen.getByTestId('board-dragging').textContent).toBe('false')
   expect(screen.queryByText((_, element) => element?.textContent === 'Engine replied d5')).toBeNull()
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(349)
   })
-  expect(screen.getByTestId('board-position').textContent).not.toBe(finalFen)
+  expect(screen.getByTestId('board-position').textContent).toBe(userFen)
   expect(screen.queryByText((_, element) => element?.textContent === 'Engine replied d5')).toBeNull()
 
   await act(async () => {
