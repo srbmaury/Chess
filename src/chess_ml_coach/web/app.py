@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,9 +13,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
+from .adaptive_routes import AdaptiveServiceRegistry
+from .adaptive_routes import router as adaptive_router
 from .explanation_routes import router as explanation_router
 from .pipeline import (
     TERMINAL_STATUSES,
@@ -23,6 +27,7 @@ from .pipeline import (
     UnknownPipelineStageError,
 )
 from .schemas import (
+    AdaptiveProgressSummary,
     ArtifactState,
     AttemptRequest,
     AttemptResponse,
@@ -115,12 +120,23 @@ def create_app(
     settings: Settings | None = None,
     *,
     pipeline_manager: PipelineManager | None = None,
+    adaptive_services: AdaptiveServiceRegistry | None = None,
 ) -> FastAPI:
     initial = settings or Settings()
     manager = pipeline_manager or PipelineManager(initial)
-    app = FastAPI(title="Chess ML Coach", version=APP_VERSION)
+    adaptive = adaptive_services or AdaptiveServiceRegistry()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            adaptive.close_all()
+
+    app = FastAPI(title="Chess ML Coach", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = initial
     app.state.pipeline_manager = manager
+    app.state.adaptive_services = adaptive
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -129,6 +145,7 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.include_router(explanation_router)
+    app.include_router(adaptive_router)
 
     def current() -> Settings:
         return app.state.settings
@@ -251,6 +268,7 @@ def create_app(
     def progress() -> ProgressResponse:
         db_path = _require_training_db(current())
         summary = TrainingStore(db_path).progress()
+        adaptive_metrics = AdaptiveSessionStore(db_path).metrics()
         return ProgressResponse(
             total_puzzles=summary.total_puzzles,
             due_puzzles=summary.due_puzzles,
@@ -261,6 +279,7 @@ def create_app(
             by_motif=[ProgressGroupRow(**row.__dict__) for row in summary.by_motif],
             by_opening=[ProgressGroupRow(**row.__dict__) for row in summary.by_opening],
             daily_reviews=daily_reviews(db_path),
+            adaptive=AdaptiveProgressSummary(**adaptive_metrics.__dict__),
         )
 
     @app.get("/api/pipeline/status")
