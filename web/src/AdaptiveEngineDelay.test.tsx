@@ -63,7 +63,7 @@ afterEach(() => {
   window.history.pushState({}, '', '/')
 })
 
-test('accepted adaptive move is shown before the computer reply', async () => {
+test('computer reply waits briefly after an accepted adaptive move', async () => {
   window.history.pushState({}, '', '/practice')
   vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
     const url = String(input)
@@ -101,19 +101,21 @@ test('accepted adaptive move is shown before the computer reply', async () => {
     await Promise.resolve()
   })
 
-  expect(screen.getByTestId('board-position').textContent).toBe(fenAfter('d2d4'))
+  const finalFen = fenAfter('d2d4', 'd7d5')
+  expect(screen.getByTestId('board-position').textContent).not.toBe(finalFen)
   expect(screen.getByTestId('board-dragging').textContent).toBe('false')
   expect(screen.queryByText((_, element) => element?.textContent === 'Engine replied d5')).toBeNull()
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(349)
   })
-  expect(screen.getByTestId('board-position').textContent).toBe(fenAfter('d2d4'))
+  expect(screen.getByTestId('board-position').textContent).not.toBe(finalFen)
+  expect(screen.queryByText((_, element) => element?.textContent === 'Engine replied d5')).toBeNull()
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1)
   })
-  expect(screen.getByTestId('board-position').textContent).toBe(fenAfter('d2d4', 'd7d5'))
+  expect(screen.getByTestId('board-position').textContent).toBe(finalFen)
   expect(screen.getByText((_, element) => element?.textContent === 'Engine replied d5')).toBeTruthy()
   expect(screen.getByTestId('board-dragging').textContent).toBe('true')
 })
