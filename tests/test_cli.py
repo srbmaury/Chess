@@ -252,7 +252,7 @@ def test_delete_user_data_requires_exact_confirmation(tmp_path: Path):
             "--model-dir",
             str(model_root),
         ],
-        input="bob\n",
+        input="ALICE\n",
     )
 
     assert result.exit_code == 1
