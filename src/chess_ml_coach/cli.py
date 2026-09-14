@@ -8,9 +8,7 @@ from typing import Annotated, TypeVar
 import typer
 
 from . import services
-from .config import Settings
-from .config import get_settings as _get_root_settings
-from .profiles import ProfileManager
+from .config import get_settings
 
 app = typer.Typer(no_args_is_help=True)
 T = TypeVar("T")
@@ -25,23 +23,6 @@ _run_report = services.run_report
 _run_puzzles = services.run_puzzles
 _training_db_path = services.training_db_path
 _answer_to_uci = services.answer_to_uci
-
-
-def _resolve_profile_settings(
-    username: str | None,
-    **kwargs,
-) -> Settings:
-    root = _get_root_settings(None, **kwargs)
-    manager = ProfileManager(root)
-    manager.migrate_legacy(root.username)
-    selected = username or root.username
-    manager.create_or_activate(selected, activate=False)
-    return manager.settings_for(selected)
-
-
-# Existing command implementations keep using one resolver name while the root/scoped
-# distinction stays centralized here.
-get_settings = _resolve_profile_settings
 
 
 def _execute(action: Callable[[], T]) -> T:
@@ -338,15 +319,10 @@ def ui(
 
     from .web.serve import create_served_app
 
-    # The browser needs root storage so a fresh community install can ask for a
-    # player before creating any profile. An explicit --username selects the
-    # initial player but does not change who owns any legacy workspace.
     settings = _execute(
-        lambda: _get_root_settings(None, data_dir=data_dir, model_dir=model_dir)
+        lambda: get_settings(username, data_dir=data_dir, model_dir=model_dir)
     )
-    web_app = _execute(
-        lambda: create_served_app(settings, initial_username=username)
-    )
+    web_app = _execute(lambda: create_served_app(settings))
     url = f"http://{host}:{port}"
     typer.echo(f"Chess ML Coach UI -> {url}")
     if open_browser:
