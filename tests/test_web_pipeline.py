@@ -48,7 +48,80 @@ def test_manager_records_monotonic_progress_and_success(tmp_path: Path):
     sequences = [event.sequence for event in events]
     assert sequences == sorted(sequences)
     assert len(sequences) == len(set(sequences))
-    assert any(event.payload.get("completed") == 10 for event in events)
+    assert any(event.payload.get("completed_moves") == 10 for event in events)
+
+
+def test_manager_preserves_pipeline_stage_and_exposes_runner_phase(tmp_path: Path):
+    def fake_runner(settings, progress):
+        progress({"stage": "split", "message": "Splitting games chronologically"})
+        return {"ok": True}
+
+    manager = PipelineManager(_settings(tmp_path), runners={"train": fake_runner})
+    manager.start("train")
+    assert _wait_for_terminal(manager).status == "succeeded"
+
+    progress_event = next(
+        event.payload
+        for event in manager.events(after_sequence=0)
+        if event.payload.get("message") == "Splitting games chronologically"
+    )
+    assert progress_event["stage"] == "train"
+    assert progress_event["phase"] == "split"
+
+
+def test_sync_web_events_explain_month_progress_and_flatten_result(tmp_path: Path):
+    def fake_runner(settings, progress):
+        progress(
+            {
+                "stage": "sync",
+                "current": 7,
+                "total": 25,
+                "archive": "https://api.chess.com/pub/player/user/games/2026/03",
+                "game_count": 321,
+                "skipped": False,
+            }
+        )
+        return {
+            "downloaded": 18,
+            "total": 339,
+            "pgn_path": tmp_path / "user_all_games.pgn",
+        }
+
+    manager = PipelineManager(_settings(tmp_path), runners={"sync": fake_runner})
+    manager.start("sync")
+    assert _wait_for_terminal(manager).status == "succeeded"
+
+    events = [event.payload for event in manager.events(after_sequence=0)]
+    progress_event = next(event for event in events if event.get("current_month") == 7)
+    assert progress_event["total_months"] == 25
+    assert progress_event["archive_month"] == "2026-03"
+    assert progress_event["games_synced"] == 321
+
+    result_event = events[-1]
+    assert result_event["downloaded_games"] == 18
+    assert result_event["total_games"] == 339
+    assert result_event["pgn_file"].endswith("user_all_games.pgn")
+    assert "result" not in result_event
+
+
+def test_train_web_result_flattens_nested_metrics(tmp_path: Path):
+    def fake_runner(settings, progress):
+        return {
+            "model_path": tmp_path / "model.joblib",
+            "metadata_path": tmp_path / "metadata.json",
+            "metrics": {"roc_auc": 0.82, "pr_auc": 0.64},
+        }
+
+    manager = PipelineManager(_settings(tmp_path), runners={"train": fake_runner})
+    manager.start("train")
+    assert _wait_for_terminal(manager).status == "succeeded"
+
+    result_event = manager.events(after_sequence=0)[-1].payload
+    assert result_event["model_file"].endswith("model.joblib")
+    assert result_event["metadata_file"].endswith("metadata.json")
+    assert result_event["metrics_roc_auc"] == 0.82
+    assert result_event["metrics_pr_auc"] == 0.64
+    assert "result" not in result_event
 
 
 def test_manager_rejects_second_job_while_one_is_running(tmp_path: Path):
@@ -191,7 +264,7 @@ def test_pipeline_sse_serializes_retained_events_and_closes_after_terminal(tmp_p
             payloads.append(json.loads(line.removeprefix("data: ")))
 
     assert payloads
-    assert any(payload.get("completed") == 1 for payload in payloads)
+    assert any(payload.get("completed_moves") == 1 for payload in payloads)
     assert payloads[-1]["status"] == "succeeded"
 
 
