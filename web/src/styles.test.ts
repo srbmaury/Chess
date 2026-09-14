@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from 'vitest'
 
-import styles from './styles.css?inline'
+const styles = readFileSync('src/styles.css', 'utf8')
 
 
 test('base form controls keep readable dark-theme colors', () => {
