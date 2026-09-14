@@ -190,9 +190,18 @@ class ProfileManager:
             if isinstance(marker, dict) and marker.get("owner_username"):
                 marker_owner = canonicalize_username(str(marker["owner_username"]))
 
-        known = key in profiles or any(path.exists() or path.is_symlink() for path in profile_paths)
+        known = key in profiles or any(
+            path.exists() or path.is_symlink() for path in profile_paths
+        )
         if not known:
             raise KeyError(f"Unknown player profile: {username}")
+
+        analysis_lock = scoped.data_dir / "engine" / "analysis.lock"
+        if analysis_lock.exists():
+            raise RuntimeError(
+                f"Cannot delete '{key}' while Stockfish analysis is running. "
+                "Stop analysis first."
+            )
 
         for path in profile_paths:
             if path.is_symlink():
