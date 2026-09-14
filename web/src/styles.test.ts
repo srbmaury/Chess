@@ -1,13 +1,19 @@
-import { readFileSync } from 'node:fs'
-
 import { expect, test } from 'vitest'
 
-const styles = readFileSync('src/styles.css', 'utf8')
+import './styles.css'
 
 
 test('base form controls keep readable dark-theme colors', () => {
-  expect(styles).toMatch(/select,input\{[^}]*background:[^;}]*/)
-  expect(styles).toMatch(/select,input\{[^}]*color:[^;}]*/)
-  expect(styles).toMatch(/select option\{[^}]*background:[^;}]*/)
-  expect(styles).toMatch(/select option\{[^}]*color:[^;}]*/)
+  const select = document.createElement('select')
+  select.innerHTML = '<option>Example</option>'
+  const input = document.createElement('input')
+  document.body.append(select, input)
+
+  const selectStyle = getComputedStyle(select)
+  const inputStyle = getComputedStyle(input)
+
+  expect(selectStyle.backgroundColor).toBe('rgb(17, 19, 15)')
+  expect(selectStyle.color).toBe('rgb(243, 244, 239)')
+  expect(inputStyle.backgroundColor).toBe('rgb(17, 19, 15)')
+  expect(inputStyle.color).toBe('rgb(243, 244, 239)')
 })
