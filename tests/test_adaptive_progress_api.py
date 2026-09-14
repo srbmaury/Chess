@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import chess
 from fastapi.testclient import TestClient
 
 from chess_ml_coach.adaptive_store import AdaptiveSessionStore, NewAdaptiveStep
@@ -12,6 +13,13 @@ from chess_ml_coach.training import TrainingStore
 from chess_ml_coach.web.app import create_app
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+
+def _fen(*moves: str) -> str:
+    board = chess.Board(START_FEN)
+    for move in moves:
+        board.push_uci(move)
+    return board.fen()
 
 
 def _seed(puzzle_id: str) -> PuzzleSeed:
@@ -56,10 +64,13 @@ def _finish_session(
     second_accepted: bool,
 ) -> None:
     session = sessions.start_or_resume(puzzle, depth=14)
+    after_d4 = _fen("d2d4")
+    after_d4_d5 = _fen("d2d4", "d7d5")
+    after_nf3 = _fen("d2d4", "d7d5", "g1f3")
     sessions.advance(
         session.session_id,
         expected_current_fen=START_FEN,
-        new_current_fen=START_FEN,
+        new_current_fen=after_nf3,
         steps=[
             NewAdaptiveStep(
                 side="user",
@@ -74,7 +85,7 @@ def _finish_session(
             ),
             NewAdaptiveStep(
                 side="engine",
-                fen_before=START_FEN,
+                fen_before=after_d4,
                 move_uci="d7d5",
                 move_san="d5",
                 accepted=True,
@@ -82,7 +93,7 @@ def _finish_session(
             ),
             NewAdaptiveStep(
                 side="user",
-                fen_before=START_FEN,
+                fen_before=after_d4_d5,
                 move_uci="g1f3",
                 move_san="Nf3",
                 accepted=second_accepted,
@@ -131,4 +142,3 @@ def test_progress_includes_adaptive_metrics_without_changing_review_accuracy(tmp
         "average_accepted_decisions": 1.5,
         "average_calculation_depth_plies": 3.0,
     }
-

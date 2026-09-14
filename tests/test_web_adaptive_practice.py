@@ -139,7 +139,7 @@ def test_adaptive_move_returns_played_engine_reply_but_not_future_solution(tmp_p
     assert "expected" not in encoded
 
 
-def test_terminal_move_retry_does_not_duplicate_review(tmp_path: Path):
+def test_rejected_move_retry_stays_active_and_does_not_reveal_solution(tmp_path: Path):
     start = _board()
     after_c4 = _board("c2c4")
     engine = FakeEngine(
@@ -161,10 +161,21 @@ def test_terminal_move_retry_does_not_duplicate_review(tmp_path: Path):
     )
 
     assert first.status_code == 200
-    assert first.json()["status"] == "failed"
+    first_payload = first.json()
+    assert first_payload["accepted"] is False
+    assert first_payload["status"] == "active"
+    assert first_payload["current_fen"] == START_FEN
+    assert first_payload["current_ply"] == 0
+    assert first_payload["review"] is None
+    assert "d2d4" not in str(first_payload)
+    assert "expected" not in str(first_payload).lower()
+
     assert second.status_code == 200
-    assert second.json()["status"] == "failed"
-    assert store.review_count("p1") == 1
+    second_payload = second.json()
+    assert second_payload["status"] == "active"
+    assert second_payload["current_fen"] == START_FEN
+    assert second_payload["user_moves_attempted"] == 2
+    assert store.review_count("p1") == 0
 
 
 def test_illegal_move_is_422_without_session_progress(tmp_path: Path):
@@ -248,4 +259,3 @@ def test_abandon_is_idempotent_and_records_no_review(tmp_path: Path):
     assert second.status_code == 200
     assert second.json()["status"] == "abandoned"
     assert store.review_count("p1") == 0
-

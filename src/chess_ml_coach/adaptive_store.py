@@ -583,10 +583,13 @@ class AdaptiveSessionStore:
             ).fetchall()
             user_steps = connection.execute(
                 """
-                SELECT session_id, step_index, accepted
-                FROM practice_session_steps
-                WHERE side = 'user'
-                ORDER BY session_id, step_index
+                SELECT steps.session_id, steps.step_index, steps.accepted,
+                       steps.fen_before, sessions.starting_fen
+                FROM practice_session_steps AS steps
+                JOIN practice_sessions AS sessions
+                  ON sessions.session_id = steps.session_id
+                WHERE steps.side = 'user'
+                ORDER BY steps.session_id, steps.step_index
                 """
             ).fetchall()
 
@@ -597,14 +600,12 @@ class AdaptiveSessionStore:
         success_count = sum(1 for row in completed if str(row["status"]) == "succeeded")
         continuation_attempts = 0
         continuation_correct = 0
-        seen_sessions: set[str] = set()
         completed_ids = {str(row["session_id"]) for row in completed}
         for row in user_steps:
             session_id = str(row["session_id"])
             if session_id not in completed_ids:
                 continue
-            if session_id not in seen_sessions:
-                seen_sessions.add(session_id)
+            if str(row["fen_before"]) == str(row["starting_fen"]):
                 continue
             continuation_attempts += 1
             continuation_correct += int(bool(row["accepted"]))
@@ -624,4 +625,3 @@ class AdaptiveSessionStore:
                 sum(int(row["current_ply"]) for row in completed) / count
             ),
         )
-
