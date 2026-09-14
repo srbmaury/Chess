@@ -46,7 +46,7 @@ def _require_training_db(settings: Settings) -> Path:
     if not path.exists():
         raise HTTPException(
             status_code=409,
-            detail="Puzzle bank not found. Run `chess-coach features` then `chess-coach puzzles`.",
+            detail="Puzzle bank not found. Run Features, then Puzzles from the Pipeline page.",
         )
     return path
 
@@ -283,9 +283,11 @@ def create_app(
         return jsonable_encoder(asdict(snapshot))
 
     @app.get("/api/pipeline/events")
-    def pipeline_events(after_sequence: int = Query(default=0, ge=0)) -> StreamingResponse:
+    def pipeline_events(
+        after_sequence: int | None = Query(default=None, ge=0),
+    ) -> StreamingResponse:
         def stream():
-            sequence = after_sequence
+            sequence = manager.latest_sequence() if after_sequence is None else after_sequence
             while True:
                 events = manager.events(after_sequence=sequence)
                 for event in events:

@@ -30,7 +30,7 @@ def run_analyze(settings: Settings, progress: ProgressCallback | None = None) ->
 
     raw_pgn = settings.data_dir / "raw" / f"{settings.username}_all_games.pgn"
     if not raw_pgn.exists():
-        raise FileNotFoundError(f"Missing {raw_pgn}. Run `chess-coach sync` first.")
+        raise FileNotFoundError(f"Missing {raw_pgn}. Run Sync first.")
     games, moves = parse_pgn_file(raw_pgn, settings.username)
     write_normalized(games, moves, settings.data_dir / "processed")
     output = settings.data_dir / "engine" / "analysis.parquet"
@@ -53,7 +53,7 @@ def _ensure_analysis_complete(moves, analysis) -> None:
         completed = len(expected) - len(missing)
         raise RuntimeError(
             f"Analysis is incomplete: {completed}/{len(expected)} user moves analyzed. "
-            "Please resume `chess-coach analyze` before building features."
+            "Please resume Analyze before building Features."
         )
 
 
@@ -85,7 +85,7 @@ def run_train(settings: Settings, progress: ProgressCallback | None = None) -> d
 
     features_path = settings.data_dir / "processed" / "features.parquet"
     if not features_path.exists():
-        raise FileNotFoundError(f"Missing {features_path}. Run `chess-coach features` first.")
+        raise FileNotFoundError(f"Missing {features_path}. Run Features first.")
     frame = pd.read_parquet(features_path)
     result = train_model(frame, settings.model_dir, progress=progress)
     return {
@@ -102,7 +102,7 @@ def run_report(settings: Settings) -> dict:
 
     features_path = settings.data_dir / "processed" / "features.parquet"
     if not features_path.exists():
-        raise FileNotFoundError(f"Missing {features_path}. Run `chess-coach features` first.")
+        raise FileNotFoundError(f"Missing {features_path}. Run Features first.")
     frame = pd.read_parquet(features_path)
     metadata_path = settings.model_dir / "mistake_model.metadata.json"
     feature_importance = None
@@ -132,7 +132,7 @@ def run_puzzles(settings: Settings, progress: ProgressCallback | None = None) ->
 
     features_path = settings.data_dir / "processed" / "features.parquet"
     if not features_path.exists():
-        raise FileNotFoundError(f"Missing {features_path}. Run `chess-coach features` first.")
+        raise FileNotFoundError(f"Missing {features_path}. Run Features first.")
     frame = pd.read_parquet(features_path)
     seeds = extract_puzzles(frame, progress=progress)
     db_path = training_db_path(settings)

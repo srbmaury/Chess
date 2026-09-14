@@ -201,7 +201,9 @@ def test_missing_training_database_returns_actionable_conflict(tmp_path: Path):
     response = client.get("/api/practice/next")
 
     assert response.status_code == 409
-    assert "chess-coach puzzles" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "Run Features, then Puzzles" in detail
+    assert "chess-coach" not in detail
 
 
 def test_dashboard_works_before_puzzle_bank_exists(tmp_path: Path):

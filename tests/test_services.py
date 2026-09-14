@@ -37,7 +37,8 @@ def test_run_puzzles_requires_feature_dataset(tmp_path: Path):
         raise AssertionError("run_puzzles should require features.parquet")
 
     assert "features.parquet" in message
-    assert "chess-coach features" in message
+    assert "run features first" in message.lower()
+    assert "chess-coach" not in message.lower()
 
 
 def test_run_features_rejects_partial_analysis_after_stopped_analyze(
@@ -71,5 +72,7 @@ def test_run_features_rejects_partial_analysis_after_stopped_analyze(
     with pytest.raises(RuntimeError, match="Analysis is incomplete") as exc_info:
         run_features(settings)
 
-    assert "1/2 user moves analyzed" in str(exc_info.value)
-    assert "resume `chess-coach analyze`" in str(exc_info.value).lower()
+    message = str(exc_info.value)
+    assert "1/2 user moves analyzed" in message
+    assert "resume analyze" in message.lower()
+    assert "chess-coach" not in message.lower()
