@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
+from ..move_quality import display_loss_pawns, stored_quality_reason
 from ..services import training_db_path
 from ..training import TrainingStore
 from .adaptive_routes import AdaptiveServiceRegistry
@@ -209,12 +210,15 @@ def create_app(
         normalized = move.uci()
         correct = normalized == puzzle.best_move_uci
         review = store.record_review(puzzle_id, answer=normalized, correct=correct)
+        quality_reason = stored_quality_reason(puzzle.quality, puzzle.cpl)
         return AttemptResponse(
             correct=correct,
             best_move_san=puzzle.best_move_san,
             best_move_uci=puzzle.best_move_uci,
             your_game_move=puzzle.your_move_san,
-            evaluation_loss_pawns=puzzle.eval_loss_pawns,
+            evaluation_loss_pawns=display_loss_pawns(puzzle.cpl, quality_reason),
+            quality=puzzle.quality,
+            quality_reason=quality_reason,
             next_interval_days=review.next_interval_days,
             next_review_at=review.next_review_at,
             source_url=puzzle.source_url or None,

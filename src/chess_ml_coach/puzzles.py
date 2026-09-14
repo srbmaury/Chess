@@ -7,6 +7,8 @@ from hashlib import sha256
 import chess
 import pandas as pd
 
+from .move_quality import display_loss_pawns
+
 PIECE_VALUES = {
     chess.PAWN: 1,
     chess.KNIGHT: 3,
@@ -31,7 +33,7 @@ class PuzzleSeed:
     best_move_san: str
     best_move_uci: str
     cpl: int
-    eval_loss_pawns: float
+    eval_loss_pawns: float | None
     quality: str
     opening: str
     eco: str
@@ -39,6 +41,7 @@ class PuzzleSeed:
     source_url: str
     motif: str
     difficulty: int
+    quality_reason: str = ""
 
 
 def _text(value: object, default: str = "") -> str:
@@ -185,7 +188,8 @@ def extract_puzzles(
     for index, (_, row) in enumerate(frame.iterrows(), start=1):
         if index % 1000 == 0:
             _emit_progress(progress, current=index, total=total, eligible=len(seeds))
-        if _text(row.get("quality")).lower() not in {"mistake", "blunder"}:
+        quality = _text(row.get("quality")).lower()
+        if quality not in {"miss", "mistake", "blunder"}:
             continue
 
         best_uci = _text(row.get("best_move_uci"))
@@ -208,6 +212,7 @@ def extract_puzzles(
         if pd.isna(cpl_value):
             continue
         cpl = max(0, int(cpl_value))
+        quality_reason = _text(row.get("quality_reason"))
         motif = classify_motif(
             fen,
             best_uci,
@@ -227,14 +232,15 @@ def extract_puzzles(
                 best_move_san=board.san(best_move),
                 best_move_uci=best_uci,
                 cpl=cpl,
-                eval_loss_pawns=round(cpl / 100.0, 2),
-                quality=_text(row.get("quality")).lower(),
+                eval_loss_pawns=display_loss_pawns(cpl, quality_reason),
+                quality=quality,
                 opening=_text(row.get("opening"), "Unknown opening"),
                 eco=_text(row.get("eco"), "unknown"),
                 game_phase=_text(row.get("game_phase"), "unknown"),
                 source_url=_text(row.get("source_url")),
                 motif=motif,
                 difficulty=_difficulty(cpl, board.legal_moves.count(), motif),
+                quality_reason=quality_reason,
             )
         )
     _emit_progress(progress, current=total, total=total, eligible=len(seeds))

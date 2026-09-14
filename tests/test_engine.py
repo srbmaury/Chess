@@ -181,7 +181,7 @@ def test_analysis_refuses_second_writer_when_lock_exists(tmp_path: Path):
         analyze_user_moves(moves, settings, output, adapter=FakeEngine())
 
 
-def test_matching_stockfish_move_can_never_be_a_mistake(tmp_path: Path):
+def test_matching_stockfish_move_is_classified_best(tmp_path: Path):
     moves = _single_user_move()
     output = tmp_path / "analysis.parquet"
     settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
@@ -190,10 +190,10 @@ def test_matching_stockfish_move_can_never_be_a_mistake(tmp_path: Path):
 
     assert result.iloc[0].best_move_uci == "e2e4"
     assert result.iloc[0].cpl == 0
-    assert result.iloc[0].quality == "good"
+    assert result.iloc[0].quality == "best"
 
 
-def test_safe_legacy_rows_are_migrated_without_reanalysis(tmp_path: Path):
+def test_previous_scoring_rows_are_reanalyzed_under_v3(tmp_path: Path):
     moves = _single_user_move()
     output = tmp_path / "analysis.parquet"
     settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
@@ -216,8 +216,8 @@ def test_safe_legacy_rows_are_migrated_without_reanalysis(tmp_path: Path):
 
     result = analyze_user_moves(moves, settings, output, adapter=engine)
 
-    assert engine.calls == 0
-    assert result.iloc[0].scoring_version == 2
+    assert engine.calls == 2
+    assert result.iloc[0].scoring_version == 3
     assert result.iloc[0].engine_config_hash != _legacy_config_hash(settings)
 
 
@@ -245,7 +245,7 @@ def test_legacy_mate_rows_are_reanalyzed_under_new_scoring(tmp_path: Path):
     result = analyze_user_moves(moves, settings, output, adapter=engine)
 
     assert engine.calls == 2
-    assert result.iloc[0].scoring_version == 2
+    assert result.iloc[0].scoring_version == 3
 
 
 def test_analysis_respects_external_profile_operation_lock(tmp_path: Path):

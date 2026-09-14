@@ -15,12 +15,33 @@ import pandas as pd
 
 from .config import MoveQualityThresholds, Settings
 from .locking import ProfileBusyError, exclusive_profile_lock
+from .move_quality import (
+    MATE_CP,
+    alternatives_show_uniqueness,
+    classify_move_quality,
+    sacrifices_material_after_reply,
+    score_snapshot,
+)
 
-MATE_CP = 100_000
-MATE_REANALYZE_THRESHOLD = 50_000
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 ProgressCallback = Callable[[dict[str, object]], None]
 ANALYSIS_COLUMNS = [
+    "game_id",
+    "ply",
+    "best_move_uci",
+    "eval_before_cp",
+    "eval_after_cp",
+    "mate_before",
+    "mate_after",
+    "expected_score_before",
+    "expected_score_after",
+    "cpl",
+    "quality",
+    "quality_reason",
+    "engine_config_hash",
+    "scoring_version",
+]
+REQUIRED_LEGACY_COLUMNS = {
     "game_id",
     "ply",
     "best_move_uci",
@@ -29,9 +50,7 @@ ANALYSIS_COLUMNS = [
     "cpl",
     "quality",
     "engine_config_hash",
-    "scoring_version",
-]
-LEGACY_ANALYSIS_COLUMNS = [column for column in ANALYSIS_COLUMNS if column != "scoring_version"]
+}
 
 
 class EngineConfigurationError(RuntimeError):
@@ -51,6 +70,14 @@ class StockfishAdapter:
     def analyse(self, board: chess.Board, depth: int) -> dict:
         return self.engine.analyse(board, chess.engine.Limit(depth=depth))
 
+    def analyse_multipv(self, board: chess.Board, depth: int, multipv: int = 2) -> list[dict]:
+        result = self.engine.analyse(
+            board,
+            chess.engine.Limit(depth=depth),
+            multipv=max(2, int(multipv)),
+        )
+        return result if isinstance(result, list) else [result]
+
     def close(self) -> None:
         self.engine.quit()
 
@@ -66,6 +93,7 @@ def centipawn_loss(best_eval_cp: int, played_eval_cp: int) -> int:
 
 
 def quality_label(cpl: int, thresholds: MoveQualityThresholds) -> str:
+    """Legacy CPL-only fallback retained for callers that lack score context."""
     if cpl >= thresholds.blunder:
         return "blunder"
     if cpl >= thresholds.mistake:
@@ -95,10 +123,6 @@ def _hash_payload(payload: dict[str, object]) -> str:
 
 def _config_hash(settings: Settings) -> str:
     return _hash_payload(_config_payload(settings, scoring_version=SCORING_VERSION))
-
-
-def _legacy_config_hash(settings: Settings) -> str:
-    return _hash_payload(_config_payload(settings, scoring_version=None))
 
 
 def _resolve_stockfish(path: str | None) -> str:
@@ -176,38 +200,6 @@ def _emit_progress(
     )
 
 
-def _is_mate_sentinel(value: object) -> bool:
-    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-    return bool(pd.notna(number) and abs(float(number)) >= MATE_REANALYZE_THRESHOLD)
-
-
-def _legacy_row_is_safe(row: pd.Series, user_move: pd.Series | None) -> bool:
-    if any(
-        _is_mate_sentinel(row.get(column))
-        for column in ("eval_before_cp", "eval_after_cp", "cpl")
-    ):
-        return False
-    if user_move is None:
-        return True
-    actual_uci = user_move.get("uci")
-    best_uci = row.get("best_move_uci")
-    if (
-        actual_uci is not None
-        and best_uci is not None
-        and str(actual_uci) == str(best_uci)
-        and float(row.get("cpl", 0) or 0) > 0
-    ):
-        return False
-    fen_after = user_move.get("fen_after")
-    if fen_after is not None and not pd.isna(fen_after):
-        try:
-            if chess.Board(str(fen_after)).is_checkmate():
-                return False
-        except ValueError:
-            pass
-    return True
-
-
 def _load_reusable_analysis(
     moves: pd.DataFrame,
     settings: Settings,
@@ -215,42 +207,27 @@ def _load_reusable_analysis(
     *,
     force: bool,
 ) -> pd.DataFrame:
+    del moves
     if force or not output_path.exists():
         return pd.DataFrame(columns=ANALYSIS_COLUMNS)
 
     raw = pd.read_parquet(output_path)
-    missing = set(LEGACY_ANALYSIS_COLUMNS) - set(raw.columns)
+    missing = REQUIRED_LEGACY_COLUMNS - set(raw.columns)
     if missing:
         raise EngineConfigurationError(
             f"Invalid analysis artifact {output_path}: missing {sorted(missing)}"
         )
     if "scoring_version" not in raw.columns:
         raw["scoring_version"] = 1
+    for column in ANALYSIS_COLUMNS:
+        if column not in raw.columns:
+            raw[column] = None
 
     config_hash = _config_hash(settings)
-    legacy_hash = _legacy_config_hash(settings)
     current = raw[
         (raw["engine_config_hash"] == config_hash)
         & (pd.to_numeric(raw["scoring_version"], errors="coerce") == SCORING_VERSION)
     ].copy()
-
-    legacy = raw[raw["engine_config_hash"] == legacy_hash].copy()
-    if not legacy.empty:
-        user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)].copy()
-        move_lookup = {
-            (str(row.game_id), int(row.ply)): pd.Series(row._asdict())
-            for row in user_moves.itertuples(index=False)
-        }
-        safe_indices = []
-        for index, row in legacy.iterrows():
-            key = (str(row["game_id"]), int(row["ply"]))
-            if _legacy_row_is_safe(row, move_lookup.get(key)):
-                safe_indices.append(index)
-        migrated = legacy.loc[safe_indices].copy()
-        if not migrated.empty:
-            migrated["engine_config_hash"] = config_hash
-            migrated["scoring_version"] = SCORING_VERSION
-            current = pd.concat([current, migrated], ignore_index=True)
 
     if current.empty:
         return pd.DataFrame(columns=ANALYSIS_COLUMNS)
@@ -260,6 +237,34 @@ def _load_reusable_analysis(
         .sort_values(["game_id", "ply"])
         .reset_index(drop=True)
     )
+
+
+def _verified_brilliant_candidate(
+    *,
+    adapter: EngineAdapter,
+    before_board: chess.Board,
+    after_board: chess.Board,
+    after_info: dict,
+    user_color: chess.Color,
+    depth: int,
+) -> bool:
+    reply_line = after_info.get("pv") or []
+    reply = reply_line[0] if reply_line and isinstance(reply_line[0], chess.Move) else None
+    if not sacrifices_material_after_reply(before_board, after_board, user_color, reply):
+        return False
+
+    analyse_multipv = getattr(adapter, "analyse_multipv", None)
+    if not callable(analyse_multipv):
+        return False
+    try:
+        candidates = analyse_multipv(before_board, depth, 2)
+    except (chess.engine.EngineTerminatedError, BrokenPipeError, OSError, TypeError, ValueError):
+        return False
+    if not isinstance(candidates, list):
+        return False
+    scores = [item.get("score") for item in candidates if isinstance(item, dict)]
+    pov_scores = [score for score in scores if isinstance(score, chess.engine.PovScore)]
+    return alternatives_show_uniqueness(pov_scores, user_color)
 
 
 def _analyze_user_moves_unlocked(
@@ -320,10 +325,13 @@ def _analyze_user_moves_unlocked(
                     with suppress(chess.engine.EngineTerminatedError, BrokenPipeError, OSError):
                         adapter.close()
                     adapter = StockfishAdapter(resolved_stockfish)
+
             before_eval = normalize_score(before_info["score"], user_color)
             after_eval = normalize_score(after_info["score"], user_color)
+            before_snapshot = score_snapshot(before_info["score"], user_color, ply=int(row.ply))
+            after_snapshot = score_snapshot(after_info["score"], user_color, ply=int(row.ply) + 1)
             pv = before_info.get("pv") or []
-            best_move = pv[0].uci() if pv else None
+            best_move = pv[0].uci() if pv and isinstance(pv[0], chess.Move) else None
             actual_move = getattr(row, "uci", None)
             delivered_mate = after_board.is_checkmate()
             is_best_move = (
@@ -335,6 +343,26 @@ def _analyze_user_moves_unlocked(
                 cpl = 0
             else:
                 cpl = centipawn_loss(before_eval, after_eval)
+
+            brilliant_candidate = False
+            if is_best_move and not delivered_mate and after_snapshot.expected_score >= 0.70:
+                brilliant_candidate = _verified_brilliant_candidate(
+                    adapter=adapter,
+                    before_board=before_board,
+                    after_board=after_board,
+                    after_info=after_info,
+                    user_color=user_color,
+                    depth=settings.stockfish_depth,
+                )
+
+            assessment = classify_move_quality(
+                before=before_snapshot,
+                after=after_snapshot,
+                cpl=cpl,
+                is_best_move=is_best_move,
+                brilliant_candidate=brilliant_candidate,
+                delivered_mate=delivered_mate,
+            )
             rows.append(
                 {
                     "game_id": str(row.game_id),
@@ -342,8 +370,13 @@ def _analyze_user_moves_unlocked(
                     "best_move_uci": best_move,
                     "eval_before_cp": before_eval,
                     "eval_after_cp": after_eval,
+                    "mate_before": before_snapshot.mate,
+                    "mate_after": after_snapshot.mate,
+                    "expected_score_before": round(before_snapshot.expected_score, 6),
+                    "expected_score_after": round(after_snapshot.expected_score, 6),
                     "cpl": cpl,
-                    "quality": quality_label(cpl, settings.thresholds),
+                    "quality": assessment.label,
+                    "quality_reason": assessment.reason,
                     "engine_config_hash": config_hash,
                     "scoring_version": SCORING_VERSION,
                 }
