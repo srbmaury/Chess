@@ -7,6 +7,7 @@ from chess_ml_coach.config import Settings
 from chess_ml_coach.profiles import ProfileManager
 from chess_ml_coach.web.app import create_app
 from chess_ml_coach.web.pipeline import PipelineManager
+from chess_ml_coach.web.profile_routes import enable_profiles
 
 
 def _root_settings(tmp_path: Path) -> Settings:
@@ -17,7 +18,9 @@ def test_profile_api_creates_and_switches_active_player(tmp_path: Path):
     root = _root_settings(tmp_path)
     profiles = ProfileManager(root)
     profiles.create_or_activate("srbmaury")
-    client = TestClient(create_app(root, profile_manager=profiles))
+    app = create_app(root)
+    enable_profiles(app, root, manager=profiles)
+    client = TestClient(app)
 
     listed = client.get("/api/profiles")
     assert listed.status_code == 200
@@ -50,7 +53,9 @@ def test_profile_activation_is_blocked_while_pipeline_is_running(tmp_path: Path)
         return {"ok": True}
 
     pipeline = PipelineManager(root, runners={"sync": blocking_runner})
-    client = TestClient(create_app(root, pipeline_manager=pipeline, profile_manager=profiles))
+    app = create_app(root, pipeline_manager=pipeline)
+    enable_profiles(app, root, manager=profiles)
+    client = TestClient(app)
 
     started = client.post("/api/pipeline/sync")
     assert started.status_code == 202
