@@ -23,6 +23,9 @@ def _root_settings(settings: Settings) -> Settings:
 
 
 def _activate(app: FastAPI, username: str) -> Settings:
+    adaptive_services = getattr(app.state, "adaptive_services", None)
+    if adaptive_services is not None:
+        adaptive_services.close_all()
     manager: ProfileManager = app.state.profile_manager
     scoped = manager.settings_for(username)
     app.state.settings = scoped
