@@ -185,7 +185,8 @@ def test_delete_profile_refuses_while_analysis_is_running(tmp_path: Path):
     manager = ProfileManager(root)
     manager.create_or_activate("Alice")
     alice = manager.settings_for("alice")
-    lock = alice.data_dir / "engine" / "analysis.lock"
+    lock = alice.profile_lock_path
+    assert lock is not None
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text("12345", encoding="utf-8")
 
@@ -195,3 +196,21 @@ def test_delete_profile_refuses_while_analysis_is_running(tmp_path: Path):
     assert alice.data_dir.exists()
     assert alice.model_dir.exists()
     assert manager.active_username() == "alice"
+
+
+def test_delete_profile_refuses_symlinked_storage_ancestor(tmp_path: Path):
+    root = _root(tmp_path)
+    outside = tmp_path / "outside-data"
+    outside.mkdir()
+    root.data_dir.symlink_to(outside, target_is_directory=True)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    alice = manager.settings_for("alice")
+    secret = alice.data_dir / "raw" / "keep.pgn"
+    secret.parent.mkdir(parents=True, exist_ok=True)
+    secret.write_text("keep", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="symlinked storage path"):
+        manager.delete_profile("alice")
+
+    assert secret.read_text(encoding="utf-8") == "keep"
