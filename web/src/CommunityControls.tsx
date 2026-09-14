@@ -92,15 +92,16 @@ export default function CommunityControls({ onProfileChanged, onActiveProfileCha
     </section>
   }
 
-  const analysisActive = pipeline?.stage === 'analyze' && ['running', 'stopping'].includes(pipeline.status || '')
+  const pipelineBusy = ['running', 'stopping'].includes(pipeline?.status || '')
+  const analysisActive = pipelineBusy && pipeline?.stage === 'analyze'
   return <div style={{position:'sticky',top:0,zIndex:30,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',padding:'10px 16px',background:'#171a14',borderBottom:'1px solid #2b3026'}}>
     <strong>Player</strong>
-    <select aria-label="Active Chess.com player" value={profiles.active_username} disabled={busy || analysisActive} onChange={(event) => { void activate(event.target.value) }}>
+    <select aria-label="Active Chess.com player" value={profiles.active_username} disabled={busy || pipelineBusy} onChange={(event) => { void activate(event.target.value) }}>
       {profiles.profiles.map((profile) => <option key={profile.username} value={profile.username}>{profile.display_username}</option>)}
     </select>
     <form onSubmit={addPlayer} style={{display:'flex',gap:8}}>
-      <input aria-label="Chess.com username" placeholder="Chess.com username" value={username} disabled={busy || analysisActive} onChange={(event) => setUsername(event.target.value)} />
-      <button type="submit" disabled={busy || analysisActive}>Add player</button>
+      <input aria-label="Chess.com username" placeholder="Chess.com username" value={username} disabled={busy || pipelineBusy} onChange={(event) => setUsername(event.target.value)} />
+      <button type="submit" disabled={busy || pipelineBusy}>Add player</button>
     </form>
     {analysisActive && <button className="ghost" disabled={busy || pipeline?.status === 'stopping'} onClick={() => { void stopAnalysis() }}>{pipeline?.status === 'stopping' ? 'Stopping analysis…' : 'Stop analysis'}</button>}
     {error && <span style={{color:'#ff9a9a',fontSize:13}}>{error}</span>}
