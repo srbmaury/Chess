@@ -55,6 +55,21 @@ def test_fresh_web_install_has_no_active_player_until_user_selects_one(tmp_path:
     assert listed.json()["profiles"] == []
 
 
+def test_existing_scoped_default_profile_is_recovered_without_registry(tmp_path: Path):
+    root = _root_settings(tmp_path)
+    existing = root.data_dir / "users" / "srbmaury" / "training"
+    existing.mkdir(parents=True)
+
+    app = create_app(root)
+    enable_profiles(app, root)
+    client = TestClient(app)
+
+    listed = client.get("/api/profiles")
+    assert listed.status_code == 200
+    assert listed.json()["active_username"] == "srbmaury"
+    assert client.get("/api/health").json()["data_dir"].endswith("data/users/srbmaury")
+
+
 def test_profile_api_creates_and_switches_active_player(tmp_path: Path):
     root = _root_settings(tmp_path)
     profiles = ProfileManager(root)
