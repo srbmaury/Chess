@@ -8,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import Settings
 from .app import create_app
-from .profile_routes import enable_profiles
 
 
 def default_frontend_dist() -> Path:
@@ -19,7 +18,6 @@ def create_served_app(
     settings: Settings | None = None,
     *,
     static_dir: Path | None = None,
-    initial_username: str | None = None,
 ):
     dist = Path(static_dir) if static_dir is not None else default_frontend_dist()
     index_path = dist / "index.html"
@@ -28,9 +26,7 @@ def create_served_app(
             f"Missing built web UI at {index_path}. Run `cd web && npm install && npm run build` first."
         )
 
-    resolved = settings or Settings()
-    app = create_app(resolved)
-    enable_profiles(app, resolved, initial_username=initial_username)
+    app = create_app(settings)
     assets = dist / "assets"
     if assets.exists():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
