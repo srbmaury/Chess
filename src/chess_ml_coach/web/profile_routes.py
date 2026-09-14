@@ -99,6 +99,12 @@ def enable_profiles(
 ) -> ProfileManager:
     roots = _root_settings(settings)
     profiles = manager or ProfileManager(roots)
+    if manager is not None:
+        # The app's Settings object is mutated when players switch. Keep the
+        # profile manager anchored to an independent root Settings snapshot.
+        profiles.root_settings = roots
+        profiles.registry_path = roots.data_dir / "profiles.json"
+        profiles.migration_marker = roots.data_dir / ".profiles-migrated.json"
     profiles.migrate_legacy(roots.username)
     profiles.create_or_activate(settings.username, activate=True)
     app.state.root_settings = roots
