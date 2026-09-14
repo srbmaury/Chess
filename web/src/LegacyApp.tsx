@@ -55,6 +55,7 @@ type AdaptiveHint = {
   user_moves_accepted: number
   current_ply: number
 }
+type AdaptiveHistoryEntry = { fen: string; step: AdaptiveSafeStep | null }
 type AdaptiveProgress = {
   sessions_completed: number
   success_rate: number | null
@@ -100,6 +101,27 @@ const api = {
 const percentage = (value: number | null) => value == null ? '—' : `${(value * 100).toFixed(1)}%`
 const decimal = (value: number | null) => value == null ? '—' : value.toFixed(1)
 
+function buildAdaptiveHistory(startFen: string, steps: AdaptiveSafeStep[]): AdaptiveHistoryEntry[] {
+  const history: AdaptiveHistoryEntry[] = [{ fen: startFen, step: null }]
+  let board: Chess
+  try {
+    board = new Chess(startFen)
+  } catch {
+    return history
+  }
+  for (const step of steps.filter((candidate) => candidate.accepted)) {
+    const move = step.move_uci
+    try {
+      const played = board.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move.length === 5 ? move[4] : undefined })
+      if (!played) break
+      history.push({ fen: board.fen(), step })
+    } catch {
+      break
+    }
+  }
+  return history
+}
+
 function Shell() {
   const nav = [['/', 'Dashboard'], ['/practice', 'Practice'], ['/mistakes', 'Mistakes'], ['/progress', 'Progress'], ['/pipeline', 'Pipeline']]
   return <div className="shell"><aside><div className="brand"><b>♞</b><div><strong>Chess ML Coach</strong><small>Personal training lab</small></div></div><nav>{nav.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'}>{label}</NavLink>)}</nav></aside><main><Routes><Route path="/" element={<DashboardPage />} /><Route path="/practice" element={<PracticePage />} /><Route path="/mistakes" element={<MistakesPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/pipeline" element={<PipelinePage />} /></Routes></main></div>
@@ -127,6 +149,7 @@ function PracticePage() {
   const [lastAdaptiveMove, setLastAdaptiveMove] = useState<AdaptiveMoveResult | null>(null)
   const [adaptiveHint, setAdaptiveHint] = useState<AdaptiveHint | null>(null)
   const [hinting, setHinting] = useState(false)
+  const [historyPly, setHistoryPly] = useState<number | null>(null)
   const [explanation, setExplanation] = useState<Explanation | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [explanationError, setExplanationError] = useState('')
@@ -141,6 +164,7 @@ function PracticePage() {
     setLastAdaptiveMove(null)
     setAdaptiveHint(null)
     setHinting(false)
+    setHistoryPly(null)
     setExplanation(null)
     setExplaining(false)
     setExplanationError('')
@@ -162,10 +186,17 @@ function PracticePage() {
 
   const adaptiveTerminal = adaptive != null && adaptive.status !== 'active'
   const finished = feedback != null || adaptiveTerminal
-  const boardFen = mode === 'adaptive' && adaptive ? adaptive.current_fen : puzzle?.fen
+  const history = puzzle && adaptive ? buildAdaptiveHistory(puzzle.fen, adaptive.steps) : []
+  const liveHistoryPly = Math.max(0, history.length - 1)
+  const requestedHistoryPly = historyPly == null ? liveHistoryPly : Math.min(Math.max(historyPly, 0), liveHistoryPly)
+  const reviewingHistory = mode === 'adaptive' && adaptive != null && historyPly != null && requestedHistoryPly < liveHistoryPly
+  const viewedHistoryPly = reviewingHistory ? requestedHistoryPly : liveHistoryPly
+  const boardFen = mode === 'adaptive' && adaptive
+    ? (reviewingHistory ? history[viewedHistoryPly]?.fen ?? adaptive.current_fen : adaptive.current_fen)
+    : puzzle?.fen
 
   async function submitMove(moveUci: string) {
-    if (!puzzle || submitting || finished) return
+    if (!puzzle || submitting || finished || reviewingHistory) return
     setSubmitting(true)
     setError('')
     try {
@@ -230,6 +261,7 @@ function PracticePage() {
       setLastAdaptiveMove(null)
       setAdaptiveHint(null)
       setHinting(false)
+      setHistoryPly(null)
       setExplanation(null)
       setExplanationError('')
       if (next === 'adaptive' && puzzle) {
@@ -243,7 +275,7 @@ function PracticePage() {
   }
 
   function onDrop(sourceSquare: string, targetSquare: string | null) {
-    if (!puzzle || submitting || finished || !targetSquare || !boardFen) return false
+    if (!puzzle || submitting || finished || reviewingHistory || !targetSquare || !boardFen) return false
     let moveUci = `${sourceSquare}${targetSquare}`
     try {
       const position = new Chess(boardFen)
@@ -259,7 +291,7 @@ function PracticePage() {
   }
 
   async function showNextBestMove() {
-    if (!adaptive || adaptive.status !== 'active' || submitting || hinting) return
+    if (!adaptive || adaptive.status !== 'active' || submitting || hinting || reviewingHistory) return
     if (adaptiveHint?.current_fen === adaptive.current_fen) return
     setHinting(true)
     setError('')
@@ -281,8 +313,31 @@ function PracticePage() {
     }
   }
 
+  function previousPosition() {
+    if (!adaptive || liveHistoryPly === 0) return
+    const current = historyPly == null ? liveHistoryPly : requestedHistoryPly
+    setHistoryPly(Math.max(0, current - 1))
+  }
+
+  function nextPosition() {
+    if (!adaptive || historyPly == null) return
+    if (requestedHistoryPly >= liveHistoryPly - 1) {
+      setHistoryPly(null)
+    } else {
+      setHistoryPly(requestedHistoryPly + 1)
+    }
+  }
+
+  function selectHistoryPosition(ply: number) {
+    if (ply >= liveHistoryPly) {
+      setHistoryPly(null)
+    } else {
+      setHistoryPly(Math.max(0, ply))
+    }
+  }
+
   async function skip() {
-    if (!puzzle || submitting) return
+    if (!puzzle || submitting || reviewingHistory) return
     try {
       setSubmitting(true)
       if (mode === 'adaptive' && adaptive?.status === 'active') {
@@ -302,10 +357,11 @@ function PracticePage() {
 
   const adaptiveReview = adaptive?.review
   const adaptiveActive = mode === 'adaptive' && adaptive?.status === 'active'
-  const boardEnabled = !submitting && !finished && (mode === 'quick' || adaptiveActive)
+  const boardEnabled = !submitting && !finished && !reviewingHistory && (mode === 'quick' || adaptiveActive)
   const maxDecisions = adaptive?.max_user_decisions ?? 4
   const outcomeClass = adaptive?.status === 'failed' ? 'feedback bad' : 'feedback good'
   const hintShown = adaptiveHint?.current_fen === adaptive?.current_fen
+  const historySteps = history.slice(1).flatMap((entry) => entry.step ? [entry.step] : [])
 
   return <section>
     <Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} />
@@ -319,9 +375,9 @@ function PracticePage() {
       <div className="board"><Chessboard options={{ position: boardFen ?? puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', allowDragging: boardEnabled, onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div>
       <div className="panel practice-info">
         <h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>
-        {mode === 'adaptive' && adaptive?.steps.some((step) => step.accepted) ? <AdaptiveLine steps={adaptive.steps} /> : null}
+        {mode === 'adaptive' && historySteps.length ? <AdaptiveLine steps={historySteps} viewingPly={viewedHistoryPly} livePly={liveHistoryPly} reviewing={reviewingHistory} onSelectPly={selectHistoryPosition} onPrevious={previousPosition} onNext={nextPosition} onReturnCurrent={() => setHistoryPly(null)} /> : null}
         {mode === 'quick' ? (!feedback ? <><p className="muted">{submitting ? 'Checking your move…' : 'Find the strongest move. The engine answer stays hidden until you commit.'}</p><button className="ghost" disabled={submitting} onClick={() => { void skip() }}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>) : (
-          !adaptive ? <p className="muted">Starting adaptive drill…</p> : adaptiveActive ? <div className="adaptive-live"><p className="muted">{submitting ? 'Checking the continuation…' : hinting ? 'Finding the next best move…' : lastAdaptiveMove?.accepted ? 'Strong. Continuing the line…' : lastAdaptiveMove?.accepted === false ? 'Not quite. Try again — the position stays the same.' : 'Find the strongest move. Strong alternatives are accepted.'}</p>{lastAdaptiveMove?.engine_reply_san && <p>Engine replied <strong>{lastAdaptiveMove.engine_reply_san}</strong></p>}{hintShown && adaptiveHint && <p>Next best move: <strong>{adaptiveHint.move_san}</strong></p>}<p className="sequence-progress">{adaptive.user_moves_accepted} / up to {maxDecisions} decisions</p><button className="ghost" disabled={submitting || hinting || hintShown} onClick={() => { void showNextBestMove() }}>{hinting ? 'Finding move…' : hintShown ? 'Move shown' : 'Show next best move'}</button><button className="ghost" disabled={submitting || hinting} onClick={() => { void skip() }}>Skip</button></div> : <div className={outcomeClass}><h3>{adaptive.status === 'succeeded' ? 'Converted' : adaptive.status === 'failed' ? 'Continuation missed' : 'Drill ended'}</h3><p>{adaptive.user_moves_accepted}/{adaptive.user_moves_attempted} strong decisions</p><p>Calculation depth: {adaptive.current_ply} plies</p><p>Maximum evaluation loss: {(adaptive.max_eval_loss_cp / 100).toFixed(2)} pawns</p>{adaptiveReview && <p>Next review: +{adaptiveReview.next_interval_days} days</p>}{puzzle.source_url && <a href={puzzle.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>
+          !adaptive ? <p className="muted">Starting adaptive drill…</p> : adaptiveActive ? <div className="adaptive-live"><p className="muted">{reviewingHistory ? 'Reviewing the played line. Return to current to continue.' : submitting ? 'Checking the continuation…' : hinting ? 'Finding the next best move…' : lastAdaptiveMove?.accepted ? 'Strong. Continuing the line…' : lastAdaptiveMove?.accepted === false ? 'Not quite. Try again — the position stays the same.' : 'Find the strongest move. Strong alternatives are accepted.'}</p>{!reviewingHistory && lastAdaptiveMove?.engine_reply_san && <p>Engine replied <strong>{lastAdaptiveMove.engine_reply_san}</strong></p>}{!reviewingHistory && hintShown && adaptiveHint && <p>Next best move: <strong>{adaptiveHint.move_san}</strong></p>}<p className="sequence-progress">{adaptive.user_moves_accepted} / up to {maxDecisions} decisions</p><button className="ghost" disabled={submitting || hinting || hintShown || reviewingHistory} onClick={() => { void showNextBestMove() }}>{hinting ? 'Finding move…' : hintShown ? 'Move shown' : 'Show next best move'}</button><button className="ghost" disabled={submitting || hinting || reviewingHistory} onClick={() => { void skip() }}>Skip</button></div> : <div className={outcomeClass}><h3>{adaptive.status === 'succeeded' ? 'Converted' : adaptive.status === 'failed' ? 'Continuation missed' : 'Drill ended'}</h3><p>{adaptive.user_moves_accepted}/{adaptive.user_moves_attempted} strong decisions</p><p>Calculation depth: {adaptive.current_ply} plies</p><p>Maximum evaluation loss: {(adaptive.max_eval_loss_cp / 100).toFixed(2)} pawns</p>{adaptiveReview && <p>Next review: +{adaptiveReview.next_interval_days} days</p>}{puzzle.source_url && <a href={puzzle.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>
         )}
       </div>
     </div>
@@ -341,9 +397,31 @@ function appendAdaptiveSteps(steps: AdaptiveSafeStep[], result: AdaptiveMoveResu
   return next
 }
 
-function AdaptiveLine({ steps }: { steps: AdaptiveSafeStep[] }) {
-  const accepted = steps.filter((step) => step.accepted)
-  return <div className="adaptive-line"><strong>Line so far</strong><ol>{accepted.map((step, index) => <li key={step.step_index}>{step.side === 'user' ? `${Math.floor(index / 2) + 1}. ${step.move_san}` : `… ${step.move_san}`}</li>)}</ol></div>
+function AdaptiveLine({ steps, viewingPly, livePly, reviewing, onSelectPly, onPrevious, onNext, onReturnCurrent }: {
+  steps: AdaptiveSafeStep[]
+  viewingPly: number
+  livePly: number
+  reviewing: boolean
+  onSelectPly: (ply: number) => void
+  onPrevious: () => void
+  onNext: () => void
+  onReturnCurrent: () => void
+}) {
+  return <div className="adaptive-line">
+    <strong>Line so far</strong>
+    <ol>{steps.map((step, index) => {
+      const ply = index + 1
+      const label = step.side === 'user' ? `${Math.floor(index / 2) + 1}. ${step.move_san}` : `… ${step.move_san}`
+      return <li key={step.step_index}><button type="button" className="history-move" aria-current={viewingPly === ply ? 'step' : undefined} onClick={() => onSelectPly(ply)}>{label}</button></li>
+    })}</ol>
+    <div className="adaptive-history-controls">
+      <button type="button" className="ghost" aria-label="Previous position" disabled={viewingPly <= 0} onClick={onPrevious}>← Previous</button>
+      <span>Ply {viewingPly} / {livePly}</span>
+      <button type="button" className="ghost" aria-label="Next position" disabled={viewingPly >= livePly} onClick={onNext}>Next →</button>
+      {reviewing && <button type="button" className="ghost return-current" onClick={onReturnCurrent}>Return to current</button>}
+    </div>
+    {reviewing && <p className="adaptive-history-note">Reviewing earlier position</p>}
+  </div>
 }
 
 function ExplanationView({ explanation }: { explanation: Explanation }) {
