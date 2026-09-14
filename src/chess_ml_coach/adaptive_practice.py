@@ -388,35 +388,30 @@ class AdaptivePracticeService:
                 advanced = self.sessions.advance(
                     session.session_id,
                     expected_current_fen=session.current_fen,
-                    new_current_fen=after_user.fen(),
+                    new_current_fen=session.current_fen,
                     steps=[user_step],
                     user_attempted_delta=1,
                     user_accepted_delta=0,
-                    current_ply=ply_after_user,
+                    current_ply=session.current_ply,
                     max_eval_loss_cp=loss_cp,
                     previous_best_eval_cp=best_eval_cp,
                 )
-                finished, review = self._finish(
-                    advanced,
-                    succeeded=False,
-                    fallback_answer=move.uci(),
-                )
                 return AdaptiveMoveResult(
-                    session_id=finished.session_id,
-                    puzzle_id=finished.puzzle_id,
-                    status=finished.status,
+                    session_id=advanced.session_id,
+                    puzzle_id=advanced.puzzle_id,
+                    status=advanced.status,
                     accepted=False,
                     move_uci=move.uci(),
                     move_san=move_san,
                     eval_loss_cp=loss_cp,
                     engine_reply_uci=None,
                     engine_reply_san=None,
-                    current_fen=finished.current_fen,
-                    user_moves_attempted=finished.user_moves_attempted,
-                    user_moves_accepted=finished.user_moves_accepted,
-                    current_ply=finished.current_ply,
-                    max_eval_loss_cp=finished.max_eval_loss_cp,
-                    review=review,
+                    current_fen=advanced.current_fen,
+                    user_moves_attempted=advanced.user_moves_attempted,
+                    user_moves_accepted=advanced.user_moves_accepted,
+                    current_ply=advanced.current_ply,
+                    max_eval_loss_cp=advanced.max_eval_loss_cp,
+                    review=None,
                 )
 
             stop_after_user = (
@@ -438,7 +433,7 @@ class AdaptivePracticeService:
                 )
                 finished, review = self._finish(
                     advanced,
-                    succeeded=True,
+                    succeeded=advanced.user_moves_attempted == advanced.user_moves_accepted,
                     fallback_answer=move.uci(),
                 )
                 return AdaptiveMoveResult(
@@ -479,7 +474,7 @@ class AdaptivePracticeService:
                 )
                 finished, review = self._finish(
                     advanced,
-                    succeeded=True,
+                    succeeded=advanced.user_moves_attempted == advanced.user_moves_accepted,
                     fallback_answer=move.uci(),
                 )
                 return AdaptiveMoveResult(
@@ -558,7 +553,7 @@ class AdaptivePracticeService:
             if should_finish:
                 advanced, review = self._finish(
                     advanced,
-                    succeeded=True,
+                    succeeded=advanced.user_moves_attempted == advanced.user_moves_accepted,
                     fallback_answer=move.uci(),
                 )
 
