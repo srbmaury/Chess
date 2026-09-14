@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
+from .explanation_routes import router as explanation_router
 from .pipeline import (
     TERMINAL_STATUSES,
     PipelineBusyError,
@@ -115,10 +116,10 @@ def create_app(
     *,
     pipeline_manager: PipelineManager | None = None,
 ) -> FastAPI:
-    resolved = settings or Settings()
-    manager = pipeline_manager or PipelineManager(resolved)
+    initial = settings or Settings()
+    manager = pipeline_manager or PipelineManager(initial)
     app = FastAPI(title="Chess ML Coach", version=APP_VERSION)
-    app.state.settings = resolved
+    app.state.settings = initial
     app.state.pipeline_manager = manager
     app.add_middleware(
         CORSMiddleware,
@@ -127,27 +128,33 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
+    app.include_router(explanation_router)
+
+    def current() -> Settings:
+        return app.state.settings
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
+        active = current()
         return HealthResponse(
             version=APP_VERSION,
-            username=resolved.username,
-            data_dir=str(resolved.data_dir),
-            model_dir=str(resolved.model_dir),
+            username=active.username,
+            data_dir=str(active.data_dir),
+            model_dir=str(active.model_dir),
         )
 
     @app.get("/api/dashboard", response_model=DashboardResponse)
     def dashboard() -> DashboardResponse:
-        analysis_path = resolved.data_dir / "engine" / "analysis.parquet"
-        features_path = resolved.data_dir / "processed" / "features.parquet"
-        report_path = resolved.data_dir / "processed" / "coaching_report.md"
-        db_path = training_db_path(resolved)
-        model_path = resolved.model_dir / "mistake_model.joblib"
+        active = current()
+        analysis_path = active.data_dir / "engine" / "analysis.parquet"
+        features_path = active.data_dir / "processed" / "features.parquet"
+        report_path = active.data_dir / "processed" / "coaching_report.md"
+        db_path = training_db_path(active)
+        model_path = active.model_dir / "mistake_model.joblib"
         analysis_state = _artifact_state(analysis_path, parquet_rows=True)
         return DashboardResponse(
             analyzed_moves=analysis_state.rows or 0,
-            training=_training_summary(resolved),
+            training=_training_summary(active),
             artifacts={
                 "analysis": analysis_state,
                 "features": _artifact_state(features_path, parquet_rows=True),
@@ -159,7 +166,7 @@ def create_app(
 
     @app.get("/api/practice/next", response_model=PracticeNextResponse)
     def practice_next() -> PracticeNextResponse:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         due = TrainingStore(db_path).due_puzzles(limit=1)
         return PracticeNextResponse(
             puzzle=_public_practice_puzzle(due[0]) if due else None,
@@ -170,7 +177,7 @@ def create_app(
         response_model=AttemptResponse,
     )
     def practice_attempt(puzzle_id: str, request: AttemptRequest) -> AttemptResponse:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         store = TrainingStore(db_path)
         puzzle = store.get_puzzle(puzzle_id)
         if puzzle is None or not puzzle.active:
@@ -184,11 +191,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="Submitted move is not legal in this position")
         normalized = move.uci()
         correct = normalized == puzzle.best_move_uci
-        review = store.record_review(
-            puzzle_id,
-            answer=normalized,
-            correct=correct,
-        )
+        review = store.record_review(puzzle_id, answer=normalized, correct=correct)
         return AttemptResponse(
             correct=correct,
             best_move_san=puzzle.best_move_san,
@@ -202,7 +205,7 @@ def create_app(
 
     @app.post("/api/practice/{puzzle_id}/skip")
     def practice_skip(puzzle_id: str) -> dict[str, bool]:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         puzzle = TrainingStore(db_path).get_puzzle(puzzle_id)
         if puzzle is None or not puzzle.active:
             raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -218,7 +221,7 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> PuzzleListResponse:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         items, total = list_puzzles(
             db_path,
             quality=quality,
@@ -238,7 +241,7 @@ def create_app(
 
     @app.get("/api/puzzles/{puzzle_id}", response_model=PuzzleItem)
     def puzzle_detail(puzzle_id: str) -> PuzzleItem:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         item = get_puzzle(db_path, puzzle_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -246,7 +249,7 @@ def create_app(
 
     @app.get("/api/progress", response_model=ProgressResponse)
     def progress() -> ProgressResponse:
-        db_path = _require_training_db(resolved)
+        db_path = _require_training_db(current())
         summary = TrainingStore(db_path).progress()
         return ProgressResponse(
             total_puzzles=summary.total_puzzles,
@@ -270,7 +273,7 @@ def create_app(
         options: dict[str, object] | None = None,
     ) -> dict[str, object]:
         try:
-            snapshot = manager.start(stage, options)
+            snapshot = manager.start(stage, options, settings=current())
         except UnknownPipelineStageError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except PipelineBusyError as exc:
