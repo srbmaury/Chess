@@ -33,7 +33,7 @@ class ChessComClient:
     def __init__(self, http: httpx.Client | None = None, retries: int = 3):
         self.http = http or httpx.Client(
             timeout=30,
-            headers={"User-Agent": "chess-ml-coach/0.1 (username: srbmaury)"},
+            headers={"User-Agent": "chess-ml-coach/0.1"},
         )
         self.retries = retries
 
