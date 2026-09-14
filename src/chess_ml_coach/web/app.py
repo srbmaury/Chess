@@ -12,6 +12,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
@@ -24,6 +25,7 @@ from .pipeline import (
     UnknownPipelineStageError,
 )
 from .schemas import (
+    AdaptiveProgressSummary,
     ArtifactState,
     AttemptRequest,
     AttemptResponse,
@@ -257,6 +259,7 @@ def create_app(
     def progress() -> ProgressResponse:
         db_path = _require_training_db(current())
         summary = TrainingStore(db_path).progress()
+        adaptive_metrics = AdaptiveSessionStore(db_path).metrics()
         return ProgressResponse(
             total_puzzles=summary.total_puzzles,
             due_puzzles=summary.due_puzzles,
@@ -267,6 +270,7 @@ def create_app(
             by_motif=[ProgressGroupRow(**row.__dict__) for row in summary.by_motif],
             by_opening=[ProgressGroupRow(**row.__dict__) for row in summary.by_opening],
             daily_reviews=daily_reviews(db_path),
+            adaptive=AdaptiveProgressSummary(**adaptive_metrics.__dict__),
         )
 
     @app.get("/api/pipeline/status")
