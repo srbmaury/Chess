@@ -35,13 +35,13 @@ class PuzzleSeed:
     cpl: int
     eval_loss_pawns: float | None
     quality: str
-    quality_reason: str
     opening: str
     eco: str
     game_phase: str
     source_url: str
     motif: str
     difficulty: int
+    quality_reason: str = ""
 
 
 def _text(value: object, default: str = "") -> str:
@@ -234,13 +234,13 @@ def extract_puzzles(
                 cpl=cpl,
                 eval_loss_pawns=display_loss_pawns(cpl, quality_reason),
                 quality=quality,
-                quality_reason=quality_reason,
                 opening=_text(row.get("opening"), "Unknown opening"),
                 eco=_text(row.get("eco"), "unknown"),
                 game_phase=_text(row.get("game_phase"), "unknown"),
                 source_url=_text(row.get("source_url")),
                 motif=motif,
                 difficulty=_difficulty(cpl, board.legal_moves.count(), motif),
+                quality_reason=quality_reason,
             )
         )
     _emit_progress(progress, current=total, total=total, eligible=len(seeds))
