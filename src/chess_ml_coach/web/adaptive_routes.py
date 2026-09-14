@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..adaptive_hint import reveal_next_move
 from ..adaptive_practice import (
     MAX_USER_DECISIONS,
     AdaptiveEngineError,
@@ -18,6 +19,7 @@ from ..config import Settings
 from ..services import training_db_path
 from ..training import ReviewResult, TrainingStore
 from .schemas import (
+    AdaptiveHintResponse,
     AdaptiveMoveRequest,
     AdaptiveMoveResponse,
     AdaptiveReviewResult,
@@ -113,6 +115,7 @@ def _start_payload(state: AdaptiveState) -> AdaptiveStartResponse:
                 accepted=step.accepted,
             )
             for step in state.steps
+            if step.accepted
         ],
         review=_review_payload(state.review),
     )
@@ -189,6 +192,31 @@ def adaptive_move(
 
 
 @router.post(
+    "/api/practice/adaptive/{session_id}/hint",
+    response_model=AdaptiveHintResponse,
+)
+def adaptive_hint(request: Request, session_id: str) -> AdaptiveHintResponse:
+    _require_db(request)
+    try:
+        service = _registry(request).for_settings(_current_settings(request))
+        result = reveal_next_move(service, session_id)
+    except Exception as exc:
+        _raise_domain_error(exc)
+        raise AssertionError("unreachable") from exc
+    return AdaptiveHintResponse(
+        session_id=result.session_id,
+        puzzle_id=result.puzzle_id,
+        status=result.status,
+        move_uci=result.move_uci,
+        move_san=result.move_san,
+        current_fen=result.current_fen,
+        user_moves_attempted=result.user_moves_attempted,
+        user_moves_accepted=result.user_moves_accepted,
+        current_ply=result.current_ply,
+    )
+
+
+@router.post(
     "/api/practice/adaptive/{session_id}/abandon",
     response_model=AdaptiveStartResponse,
 )
@@ -200,4 +228,3 @@ def abandon_adaptive(request: Request, session_id: str) -> AdaptiveStartResponse
         _raise_domain_error(exc)
         raise AssertionError("unreachable") from exc
     return _start_payload(state)
-
