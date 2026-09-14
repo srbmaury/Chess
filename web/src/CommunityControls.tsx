@@ -1,0 +1,80 @@
+import { FormEvent, useEffect, useState } from 'react'
+
+type Profile = { username: string; display_username: string }
+type ProfileList = { active_username: string | null; profiles: Profile[] }
+type PipelineStatus = { stage?: string | null; status?: string; username?: string | null }
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init })
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`
+    try { const body = await response.json(); message = body.detail || message } catch { /* keep status message */ }
+    throw new Error(message)
+  }
+  return response.json() as Promise<T>
+}
+
+export default function CommunityControls({ onProfileChanged }: { onProfileChanged: () => void }) {
+  const [profiles, setProfiles] = useState<ProfileList | null>(null)
+  const [username, setUsername] = useState('')
+  const [pipeline, setPipeline] = useState<PipelineStatus | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function refreshProfiles() {
+    try {
+      const data = await request<ProfileList>('/api/profiles')
+      if (Array.isArray(data.profiles)) setProfiles(data)
+    } catch { /* optional on older/dev API */ }
+  }
+
+  async function refreshPipeline() {
+    try { setPipeline(await request<PipelineStatus>('/api/pipeline/status')) } catch { /* supplemental */ }
+  }
+
+  useEffect(() => {
+    void refreshProfiles(); void refreshPipeline()
+    const timer = window.setInterval(() => { void refreshPipeline() }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  async function activate(next: string) {
+    if (!next || next === profiles?.active_username) return
+    setBusy(true); setError('')
+    try {
+      const data = await request<ProfileList>(`/api/profiles/${encodeURIComponent(next)}/activate`, { method: 'POST' })
+      setProfiles(data); onProfileChanged()
+    } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
+  }
+
+  async function addPlayer(event: FormEvent) {
+    event.preventDefault()
+    const next = username.trim(); if (!next) return
+    setBusy(true); setError('')
+    try {
+      await request('/api/profiles', { method: 'POST', body: JSON.stringify({ username: next, activate: true }) })
+      setUsername(''); await refreshProfiles(); onProfileChanged()
+    } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
+  }
+
+  async function stopAnalysis() {
+    setBusy(true); setError('')
+    try { setPipeline(await request<PipelineStatus>('/api/pipeline/stop', { method: 'POST' })) }
+    catch (x) { setError((x as Error).message) } finally { setBusy(false) }
+  }
+
+  if (!profiles) return null
+  const analysisActive = pipeline?.stage === 'analyze' && ['running', 'stopping'].includes(pipeline.status || '')
+  return <div style={{position:'sticky',top:0,zIndex:30,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',padding:'10px 16px',background:'#171a14',borderBottom:'1px solid #2b3026'}}>
+    <strong>Player</strong>
+    <select aria-label="Active Chess.com player" value={profiles.active_username || ''} disabled={busy || analysisActive} onChange={(event) => { void activate(event.target.value) }}>
+      {profiles.profiles.map((profile) => <option key={profile.username} value={profile.username}>{profile.display_username}</option>)}
+    </select>
+    <form onSubmit={addPlayer} style={{display:'flex',gap:8}}>
+      <input aria-label="Chess.com username" placeholder="Chess.com username" value={username} disabled={busy || analysisActive} onChange={(event) => setUsername(event.target.value)} />
+      <button type="submit" disabled={busy || analysisActive}>Add player</button>
+    </form>
+    {analysisActive && <button className="ghost" disabled={busy || pipeline?.status === 'stopping'} onClick={() => { void stopAnalysis() }}>{pipeline?.status === 'stopping' ? 'Stopping analysis…' : 'Stop analysis'}</button>}
+    {error && <span style={{color:'#ff9a9a',fontSize:13}}>{error}</span>}
+  </div>
+}

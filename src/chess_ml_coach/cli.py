@@ -8,7 +8,9 @@ from typing import Annotated, TypeVar
 import typer
 
 from . import services
-from .config import get_settings
+from .config import Settings
+from .config import get_settings as _get_root_settings
+from .profiles import ProfileManager
 
 app = typer.Typer(no_args_is_help=True)
 T = TypeVar("T")
@@ -23,6 +25,23 @@ _run_report = services.run_report
 _run_puzzles = services.run_puzzles
 _training_db_path = services.training_db_path
 _answer_to_uci = services.answer_to_uci
+
+
+def _resolve_profile_settings(
+    username: str | None,
+    **kwargs,
+) -> Settings:
+    root = _get_root_settings(None, **kwargs)
+    manager = ProfileManager(root)
+    manager.migrate_legacy(root.username)
+    selected = username or root.username
+    manager.create_or_activate(selected, activate=False)
+    return manager.settings_for(selected)
+
+
+# Existing command implementations keep using one resolver name while the root/scoped
+# distinction stays centralized here.
+get_settings = _resolve_profile_settings
 
 
 def _execute(action: Callable[[], T]) -> T:

@@ -22,7 +22,7 @@ def _wait_for_terminal(manager: PipelineManager, timeout: float = 2.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         snapshot = manager.snapshot()
-        if snapshot.status in {"succeeded", "failed"}:
+        if snapshot.status in {"succeeded", "failed", "cancelled"}:
             return snapshot
         time.sleep(0.01)
     raise AssertionError("pipeline job did not reach a terminal state")
@@ -99,6 +99,52 @@ def test_analyze_depth_override_does_not_mutate_base_settings(tmp_path: Path):
 
     assert seen_depths == [7]
     assert settings.stockfish_depth == 14
+
+
+def test_manager_can_cancel_running_analysis_at_progress_boundary(tmp_path: Path):
+    started = threading.Event()
+
+    def cancellable_runner(settings, progress):
+        started.set()
+        completed = 0
+        while True:
+            completed += 1
+            progress({"completed": completed, "total": 100, "analyzed": completed, "reused": 0})
+            time.sleep(0.01)
+
+    manager = PipelineManager(_settings(tmp_path), runners={"analyze": cancellable_runner})
+    manager.start("analyze")
+    assert started.wait(timeout=1)
+
+    stopping = manager.stop()
+    assert stopping.status == "stopping"
+    finished = _wait_for_terminal(manager)
+
+    assert finished.status == "cancelled"
+    assert finished.stage == "analyze"
+    assert manager.events(after_sequence=0)[-1].payload["status"] == "cancelled"
+
+
+def test_pipeline_api_can_stop_running_analysis(tmp_path: Path):
+    started = threading.Event()
+
+    def cancellable_runner(settings, progress):
+        started.set()
+        while True:
+            progress({"completed": 1, "total": 100, "analyzed": 1, "reused": 0})
+            time.sleep(0.01)
+
+    manager = PipelineManager(_settings(tmp_path), runners={"analyze": cancellable_runner})
+    client = TestClient(create_app(_settings(tmp_path), pipeline_manager=manager))
+
+    response = client.post("/api/pipeline/analyze")
+    assert response.status_code == 202
+    assert started.wait(timeout=1)
+
+    stop = client.post("/api/pipeline/stop")
+    assert stop.status_code == 202
+    assert stop.json()["status"] == "stopping"
+    assert _wait_for_terminal(manager).status == "cancelled"
 
 
 def test_pipeline_api_rejects_invalid_and_concurrent_starts(tmp_path: Path):
