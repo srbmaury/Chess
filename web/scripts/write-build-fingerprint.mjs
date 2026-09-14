@@ -20,7 +20,7 @@ const files = [
   ...await walk(join(root, 'src')),
   join(root, 'index.html'),
   join(root, 'package.json'),
-].sort((a, b) => relative(root, a).localeCompare(relative(root, b)))
+].sort()
 
 const hash = createHash('sha256')
 for (const path of files) {
