@@ -100,6 +100,8 @@ const api = {
 
 const percentage = (value: number | null) => value == null ? '—' : `${(value * 100).toFixed(1)}%`
 const decimal = (value: number | null) => value == null ? '—' : value.toFixed(1)
+const ADAPTIVE_ENGINE_REPLY_DELAY_MS = 350
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 
 function buildAdaptiveHistory(startFen: string, steps: AdaptiveSafeStep[]): AdaptiveHistoryEntry[] {
   const history: AdaptiveHistoryEntry[] = [{ fen: startFen, step: null }]
@@ -209,6 +211,9 @@ function PracticePage() {
           setAdaptive(session)
         }
         const result = await api.adaptiveMove(session.session_id, moveUci)
+        if (result.accepted === true && result.engine_reply_uci) {
+          await wait(ADAPTIVE_ENGINE_REPLY_DELAY_MS)
+        }
         setLastAdaptiveMove(result)
         if (adaptiveHint && result.current_fen !== adaptiveHint.current_fen) {
           setAdaptiveHint(null)
