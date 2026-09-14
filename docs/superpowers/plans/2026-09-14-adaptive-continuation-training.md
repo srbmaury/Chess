@@ -19,11 +19,11 @@
 - Quiet/stable completion requires at least **2 accepted user decisions**, a non-forcing next PV move, no forced mate, and evaluation movement of at most **30 cp**.
 - Exactly one spaced-repetition review is recorded when a session succeeds or fails; abandoned sessions record no review.
 - Existing `analysis.parquet`, the analyzer single-writer lock, profile isolation, explanation cache, and Quick mode semantics must remain unchanged.
-- Old per-player `training.db` files upgrade in place with `CREATE TABLE IF NOT EXISTS`/safe schema additions.
+- Old per-player `training.db` files upgrade in place with safe additive schema creation.
 
 ---
 
-### Task 1: Adaptive session persistence and atomic review finalization
+### Task 1: Adaptive persistence and atomic review finalization
 
 **Files:**
 - Create: `src/chess_ml_coach/adaptive_store.py`
@@ -33,12 +33,12 @@
 
 **Interfaces:**
 - Produces `AdaptiveSession`, `AdaptiveStep`, `AdaptiveMetrics`, `AdaptiveSessionStore`.
-- Produces `TrainingStore.record_review_on_connection(connection, puzzle_id, *, answer, correct, now) -> tuple[int, ReviewResult]` so Quick and adaptive finalization share one review algorithm.
-- `AdaptiveSessionStore.finalize(session_id, *, succeeded, answer, now=None) -> tuple[AdaptiveSession, ReviewResult]` must be transactional and idempotent.
+- Produces `TrainingStore.record_review_on_connection(connection, puzzle_id, *, answer, correct, now) -> tuple[int, ReviewResult]`.
+- `AdaptiveSessionStore.finalize(session_id, *, succeeded, answer, now=None) -> tuple[AdaptiveSession, ReviewResult]` is transactional and idempotent.
 
 - [ ] **Step 1: Write failing persistence tests**
 
-Add tests that construct a normal `TrainingStore`, seed one `PuzzleSeed`, then instantiate `AdaptiveSessionStore` on the same DB. Cover start/resume, step ordering, abandon-without-review, and finalization retry:
+Add tests for start/resume, ordered steps, abandon-without-review, schema upgrade preserving old reviews, and idempotent finalization:
 
 ```python
 session = sessions.start_or_resume(puzzle, depth=14, now=now)
@@ -61,21 +61,17 @@ assert review == again_review
 assert training.review_count(puzzle.puzzle_id) == 1
 ```
 
-Also assert `practice_session_steps` has unique `(session_id, step_index)`, only one active session exists for one puzzle, and schema initialization does not change existing puzzle/review rows.
-
-- [ ] **Step 2: Run RED tests**
-
-Run:
+- [ ] **Step 2: Run RED**
 
 ```bash
 pytest tests/test_adaptive_store.py tests/test_training.py -q
 ```
 
-Expected: collection/import failure because `adaptive_store.py` and the shared review transaction helper do not exist.
+Expected: import failure because the adaptive store and shared transaction helper do not exist.
 
-- [ ] **Step 3: Extract the existing review mutation without changing semantics**
+- [ ] **Step 3: Extract the existing review mutation without changing behavior**
 
-In `training.py`, move the SQL currently inside `record_review()` into a connection-aware method:
+Move the current `record_review()` SQL into this concrete connection-aware interface:
 
 ```python
 @staticmethod
@@ -87,31 +83,41 @@ def record_review_on_connection(
     correct: bool,
     now: datetime | None = None,
 ) -> tuple[int, ReviewResult]:
-    ...
+    resolved_now = _ensure_utc(now)
+    # Run the existing puzzle lookup, streak/interval calculation,
+    # puzzle UPDATE, and review INSERT on this supplied connection.
+    # Return (inserted_review_id, ReviewResult).
 ```
 
-It returns the inserted review row id plus the existing `ReviewResult`. Keep `record_review()` as a thin wrapper that opens the connection and delegates. Existing schedule/mastery tests must remain byte-for-byte equivalent in behavior.
+`record_review()` becomes a thin wrapper that opens a connection and delegates. The existing 1/3/7/14/30-day schedule and 4-correct mastery threshold must not change.
 
-- [ ] **Step 4: Implement `AdaptiveSessionStore`**
+- [ ] **Step 4: Implement adaptive tables and immutable models**
 
-Create `practice_sessions` and `practice_session_steps` exactly from the approved spec. `start_or_resume()` uses one active session per puzzle, `append_steps()` validates the expected active status/current FEN under `BEGIN IMMEDIATE`, and `finalize()` performs all of these in the same SQLite transaction:
+`AdaptiveSessionStore` creates the approved `practice_sessions` and `practice_session_steps` tables. Add terminal review snapshot columns to `practice_sessions` so retries return the original scheduling result even after future reviews: `review_next_interval_days`, `review_next_review_at`, `review_consecutive_correct`, and `review_mastered`.
+
+`start_or_resume()` returns the existing active row for a puzzle or creates one. `append_steps()` runs under `BEGIN IMMEDIATE`, requires `status='active'`, verifies the expected `current_fen`, assigns monotonically increasing `step_index`, and updates counters/FEN/previous evaluation atomically.
+
+- [ ] **Step 5: Implement transactional finalization**
+
+Use this sequence on one SQLite connection:
 
 ```text
 BEGIN IMMEDIATE
 read session
-if review_recorded: return stored terminal result
-record review through TrainingStore.record_review_on_connection(...)
-update status/review_recorded/review_id/finished_at
+if review_recorded = 1: reconstruct original ReviewResult from session snapshot
+else:
+  call TrainingStore.record_review_on_connection(...)
+  update status, review_recorded, review_id and review snapshot columns
 COMMIT
 ```
 
-Persist the terminal review fields needed to reconstruct an idempotent API response (`review_id`, status, plus review schedule retrievable by the inserted review and puzzle state).
+`abandon()` marks only active sessions abandoned and never writes a review.
 
-- [ ] **Step 5: Add adaptive aggregate query**
+- [ ] **Step 6: Add aggregate metrics**
 
-`AdaptiveSessionStore.metrics()` returns completed sessions, success rate, continuation accuracy excluding each session's first user move, average accepted decisions, and average terminal `current_ply`.
+`AdaptiveSessionStore.metrics()` returns completed sessions, success rate, continuation accuracy excluding the first user step per session, average accepted decisions, and average terminal `current_ply`.
 
-- [ ] **Step 6: Run GREEN tests and commit**
+- [ ] **Step 7: Run GREEN and commit**
 
 ```bash
 pytest tests/test_adaptive_store.py tests/test_training.py -q
@@ -121,35 +127,23 @@ git commit -m "feat: persist adaptive practice sessions"
 
 ---
 
-### Task 2: Hybrid Stockfish adaptive practice service
+### Task 2: Hybrid Stockfish continuation service
 
 **Files:**
 - Create: `src/chess_ml_coach/adaptive_practice.py`
 - Create: `tests/test_adaptive_practice.py`
-- Do not modify: full-game analyzer locking code in `src/chess_ml_coach/engine.py`
+- Do not change: full-game analysis locking or `ANALYSIS_COLUMNS` in `src/chess_ml_coach/engine.py`
 
 **Interfaces:**
-- Produces `AdaptivePracticeService.start(puzzle)`, `.submit_move(session_id, move_uci)`, `.abandon(session_id)`, `.close()`.
-- Produces immutable result dataclasses `AdaptiveState` and `AdaptiveMoveResult` safe for API serialization.
-- Constructor accepts an injected engine factory for tests; production uses `_resolve_stockfish` + `StockfishAdapter`.
+- `AdaptivePracticeService.start(puzzle) -> AdaptiveState`
+- `AdaptivePracticeService.submit_move(session_id, move_uci) -> AdaptiveMoveResult`
+- `AdaptivePracticeService.abandon(session_id) -> AdaptiveState`
+- `AdaptivePracticeService.close_session(session_id) -> None`
+- `AdaptivePracticeService.close() -> None`
 
-- [ ] **Step 1: Write RED service tests with a scripted fake engine**
+- [ ] **Step 1: Write RED engine/service tests**
 
-Use `chess.engine.PovScore`/`Cp`/`Mate` values in fake `analyse()` responses. Cover:
-
-```text
-stored first best move -> accepted without candidate-comparison analysis
-alternate move with 20 cp loss -> accepted
-alternate move with 31 cp loss -> failed + one incorrect review
-winning mate preserved -> accepted
-winning mate lost -> failed
-illegal move -> 422-style domain error, zero DB mutation
-engine reply advances persisted FEN
-quiet/stable position after 2 accepted decisions -> succeeded
-4 accepted decisions / 8 plies -> succeeded
-engine exception -> active session unchanged, no review
-resume after constructing a new service -> persisted FEN is authoritative
-```
+Use a scripted fake adapter returning real `chess.engine.PovScore` values. Cover exact PV acceptance, a 20-cp alternative accepted, a 31-cp alternative failed, winning mate preserved/lost, illegal move with zero mutation, engine reply FEN advancement, quiet/stable completion, terminal/hard-cap completion, persisted resume, engine failure without user penalty, and double-submit serialization.
 
 - [ ] **Step 2: Run RED**
 
@@ -157,32 +151,32 @@ resume after constructing a new service -> persisted FEN is authoritative
 pytest tests/test_adaptive_practice.py -q
 ```
 
-Expected: import failure for `AdaptivePracticeService`.
+- [ ] **Step 3: Implement per-session engine/PV cache**
 
-- [ ] **Step 3: Implement engine lifecycle and PV cache**
+Keep an in-memory entry per `session_id` containing one `StockfishAdapter`, an optional expected next user UCI move, and last access time. The first expected move is the stored `puzzle.best_move_uci`. After an accepted user move, analyze the opponent-to-move board, play `pv[0]`, and retain `pv[1]` as the next expected user move only when it is legal after the reply.
 
-Maintain an in-process mapping keyed by `session_id` containing one adapter and the next expected user PV move. The first puzzle move may use `puzzle.best_move_uci` as the expected move. After an accepted user move, analyze the reply position once, play `pv[0]`, and retain `pv[1]` as the next expected user move when legal.
+An exact expected move skips the separate candidate-comparison analysis, but reply/stop analysis still runs. A resumed session after process restart simply has no PV cache and therefore re-analyzes safely from persisted FEN.
 
-A cache hit accepts the exact PV move without a separate candidate comparison, but the service still performs the analysis required to choose the opponent reply/stop condition.
+- [ ] **Step 4: Implement move scoring**
 
-- [ ] **Step 4: Implement candidate scoring**
-
-For deviations, analyze the current board for `best_info` and the board after the candidate for `candidate_info`, always converting score from the puzzle user's color. Ordinary acceptance is:
+For a deviation, analyze current and post-candidate boards from the puzzle user's color:
 
 ```python
+best_eval_cp = normalize_score(best_info["score"], user_color)
+candidate_eval_cp = normalize_score(candidate_info["score"], user_color)
 loss_cp = max(0, best_eval_cp - candidate_eval_cp)
 accepted = loss_cp <= 30
 ```
 
-If the best current POV score is a positive mate, require the post-candidate POV score to also be a positive mate.
+When the current best POV score is a positive forced mate, accept only when the candidate POV score is also a positive forced mate.
 
-- [ ] **Step 5: Implement deterministic stop logic**
+- [ ] **Step 5: Implement deterministic stopping**
 
-After an accepted user move: stop immediately for terminal board, 4 accepted decisions, or 8 plies. Otherwise play the strongest engine reply. If at least 2 user decisions are accepted, analyze the resulting user-to-move board; continue on forced mate or if the first PV move is a check/capture/promotion. Stop successfully only when that move is non-forcing and `abs(current_best_eval_cp - previous_best_eval_cp) <= 30`.
+Stop successfully immediately for terminal board, 4 accepted user decisions, or 8 plies. Otherwise play the strongest reply. Once 2 user decisions are accepted, analyze the new user-to-move position: continue on forced mate or when the first PV move gives check, is a capture, or is a promotion; otherwise succeed when `abs(current_best_eval_cp - previous_best_eval_cp) <= 30`.
 
-- [ ] **Step 6: Serialize session mutation**
+- [ ] **Step 6: Bound engine lifetime and serialize mutation**
 
-Use a per-session `threading.Lock` around submit/abandon so concurrent requests cannot both advance one session. Database `BEGIN IMMEDIATE` remains the final mutation guard.
+Use a per-session `threading.Lock` around submit/abandon. Close the adapter when a session succeeds, fails, or is abandoned; `close()` shuts down all remaining adapters during app cleanup/profile switch. Persisted sessions remain active even if their in-memory adapter is closed.
 
 - [ ] **Step 7: Run GREEN and commit**
 
@@ -194,7 +188,7 @@ git commit -m "feat: add adaptive continuation engine"
 
 ---
 
-### Task 3: Adaptive FastAPI routes and schemas
+### Task 3: Adaptive FastAPI API and profile-safe lifecycle
 
 **Files:**
 - Create: `src/chess_ml_coach/web/adaptive_routes.py`
@@ -210,7 +204,7 @@ git commit -m "feat: add adaptive continuation engine"
 
 - [ ] **Step 1: Write API RED tests**
 
-Assert start/resume returns only safe state fields and never `best_move_uci`, expected next move, or engine PV. Assert an accepted move may return the engine reply and new FEN, terminal retries do not add reviews, inactive puzzles return 409, illegal moves return 422, and two profile-scoped apps/active profiles cannot access each other's session IDs.
+Assert start/resume never exposes `best_move_uci`, expected next move, or engine PV; accepted moves may expose only the move just played and engine reply; terminal retry does not add reviews; inactive puzzle is 409; illegal move is 422; engine unavailable is 503; and a session from one player profile cannot be accessed after switching to another profile.
 
 - [ ] **Step 2: Run RED**
 
@@ -218,15 +212,15 @@ Assert start/resume returns only safe state fields and never `best_move_uci`, ex
 pytest tests/test_web_adaptive_practice.py -q
 ```
 
-- [ ] **Step 3: Add Pydantic schemas**
+- [ ] **Step 3: Add explicit schemas**
 
-Add `AdaptiveStartResponse`, `AdaptiveMoveRequest`, `AdaptiveMoveResponse`, safe step history, and terminal review fields. Keep `next_expected_move` out of every response model.
+Create `AdaptiveSafeStep`, `AdaptiveStartResponse`, `AdaptiveMoveRequest`, `AdaptiveMoveResponse`, and `AdaptiveReviewResult`. Do not define any `next_expected_move`, best-PV, or hidden-answer field in response schemas.
 
-- [ ] **Step 4: Add route module and app wiring**
+- [ ] **Step 4: Wire one adaptive service to the app**
 
-Routes obtain the current `Settings` at request time, build/use the adaptive service for that player's `training.db`, map domain not-found/inactive/illegal/engine errors to 404/409/422/503, and return terminal state idempotently.
+`create_app()` initializes an adaptive service factory/cache keyed by the active player's training DB path. Routes resolve `request.app.state.settings` at request time, use only that player's DB, and map domain errors to HTTP statuses.
 
-When a profile is activated, close/discard any in-memory adaptive engines owned by the previous profile before switching `app.state.settings`; persisted sessions remain resumable.
+On profile activation, call `app.state.adaptive_services.close_all()` before changing `app.state.settings`. Add a FastAPI lifespan/shutdown cleanup that also closes all adapters. Persisted session rows are never deleted by this cleanup.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -244,25 +238,14 @@ git commit -m "feat: expose adaptive practice API"
 - Modify: `web/src/LegacyApp.tsx`
 - Modify: `web/src/styles.css`
 - Create: `web/src/AdaptivePractice.test.tsx`
-- Preserve: existing `Why is this best?` post-completion flow
 
 **Interfaces:**
-- Frontend consumes the Task 3 adaptive endpoints.
-- Quick mode continues calling `/api/practice/{id}/attempt` exactly as today.
+- Adaptive UI consumes Task 3 endpoints.
+- Quick continues using `/api/practice/{id}/attempt` exactly as today.
 
 - [ ] **Step 1: Write RED frontend tests**
 
-Mock the API and assert:
-
-```text
-Adaptive is selected on initial Practice render
-Quick can be selected and uses the old one-move endpoint
-Adaptive start/resume renders returned current_fen
-accepted user move + engine reply updates board and leaves drill active
-failed continuation displays partial result and next-review interval
-successful terminal result displays Converted and Why is this best?
-no response renders an expected future move
-```
+Mock API calls and assert Adaptive is selected initially, Quick still uses the old endpoint, start/resume renders returned `current_fen`, accepted move + engine reply updates the board and continues, failed continuation shows partial result, successful completion shows review scheduling plus `Why is this best?`, and no UI text/DOM data reveals a future expected move.
 
 - [ ] **Step 2: Run RED**
 
@@ -270,21 +253,23 @@ no response renders an expected future move
 cd web && npm run test:run -- AdaptivePractice.test.tsx
 ```
 
-- [ ] **Step 3: Implement API types and mode state**
+- [ ] **Step 3: Add typed adaptive client state**
 
-Add typed adaptive methods beside the existing `api` methods. Default `mode` to `'adaptive'`. Reset/abandon active adaptive state when intentionally switching puzzles/modes; browser refresh resumes by calling start for the same due puzzle.
+Add adaptive request/response types and API methods beside the existing client. Initialize `mode` to `'adaptive'`. When a due puzzle loads in Adaptive mode, call start; if the server returns an active persisted session, display its `current_fen` and safe step history.
 
-- [ ] **Step 4: Implement incremental board flow**
+- [ ] **Step 4: Implement incremental continuation UI**
 
-The board's displayed FEN is `adaptive.current_fen` while adaptive is active. On a user drop, submit the move, show `Strong. Continuing the line…` when accepted, apply the returned engine reply/current FEN, and re-enable user input only if status remains `active`.
+Use `adaptive.current_fen` as board position. On user drop, submit once, disable the board while waiting, apply returned `current_fen`, show the engine reply already played, and re-enable only when status remains active. Terminal panel shows Converted/Continuation missed, accepted vs attempted user decisions, calculation depth, maximum evaluation loss, next review, source-game link, and the existing explanation button.
 
-Terminal panel displays accepted/attempted user decisions, current ply calculation depth, maximum loss, next review, source-game link, and existing explanation button.
+- [ ] **Step 5: Keep mode switching safe**
 
-- [ ] **Step 5: Style the mode switch/progress without introducing theme regressions**
+Switching from an active Adaptive drill to Quick explicitly calls abandon before changing mode, so it does not create a spaced-repetition failure. Loading the next puzzle abandons any still-active session first. Browser refresh does not abandon; start resumes it.
 
-Use existing CSS variables and dark form-control rules. Add a compact segmented Adaptive/Quick control and continuation progress text; do not hard-code a light background.
+- [ ] **Step 6: Style with existing dark-theme variables**
 
-- [ ] **Step 6: Run GREEN and commit**
+Add a compact Adaptive/Quick segmented control and sequence progress text using `--panel`, `--line`, `--text`, `--muted`, and `--accent`. Do not introduce light native-control defaults.
+
+- [ ] **Step 7: Run GREEN and commit**
 
 ```bash
 cd web
@@ -297,45 +282,35 @@ git commit -m "feat: add adaptive continuation practice UI"
 
 ---
 
-### Task 5: Adaptive progress metrics and documentation
+### Task 5: Adaptive Progress metrics and README
 
 **Files:**
 - Modify: `src/chess_ml_coach/web/schemas.py`
 - Modify: `src/chess_ml_coach/web/app.py`
 - Modify: `web/src/LegacyApp.tsx`
-- Modify: `web/src/App.test.tsx` or create `web/src/AdaptiveProgress.test.tsx`
+- Create: `web/src/AdaptiveProgress.test.tsx`
 - Modify: `README.md`
 
 - [ ] **Step 1: Write RED progress tests**
 
-Seed one succeeded and one failed adaptive session with multiple user steps. Assert `/api/progress` reports:
+Seed one succeeded and one failed adaptive session with multiple user steps. Assert `/api/progress` returns a nested `adaptive` object with `sessions_completed=2`, `success_rate=0.5`, continuation accuracy excluding the first user move, average accepted decisions, and average calculation depth.
 
-```text
-adaptive_sessions_completed = 2
-adaptive_success_rate = 0.5
-continuation_accuracy = accepted continuation attempts / continuation attempts
-average_accepted_decisions
-average_calculation_depth_plies
-```
+- [ ] **Step 2: Expose metrics without redefining existing review accuracy**
 
-The first user move of each session must be excluded from continuation accuracy.
-
-- [ ] **Step 2: Expose metrics through `ProgressResponse`**
-
-Add a nested `adaptive` object so existing top-level review/mastery fields retain their meaning.
+Add `AdaptiveProgressSummary` to Pydantic schemas and populate it from `AdaptiveSessionStore.metrics()`. Existing `accuracy`, `Mastered`, motif, opening, and daily-review calculations remain unchanged.
 
 - [ ] **Step 3: Add Progress UI panel**
 
-Show completed adaptive drills, conversion rate, continuation accuracy, average decisions, and average depth. Keep the existing review activity chart and Mastered definition unchanged.
+Show adaptive drills completed, conversion rate, continuation accuracy, average decisions, and average depth beneath the existing review activity panel. Keep chart theming untouched.
 
 - [ ] **Step 4: Update README**
 
-Replace the old “multi-ply puzzle continuations” next-improvement bullet with documentation of Adaptive vs Quick, 30-cp alternative acceptance, resumability, and the fact that adaptive practice may invoke Stockfish locally during a drill.
+Document Adaptive default vs Quick, 30-cp alternative acceptance, local Stockfish use during an adaptive drill, resumable sessions, stricter mastery semantics, and new continuation metrics. Remove the old “multi-ply puzzle continuations” item from Next improvements.
 
 - [ ] **Step 5: Run targeted checks and commit**
 
 ```bash
-pytest tests/test_web_adaptive_practice.py tests/test_training.py -q
+pytest tests/test_web_adaptive_practice.py tests/test_adaptive_store.py tests/test_training.py -q
 cd web && npm run test:run && npm run build && cd ..
 git add src/chess_ml_coach/web/schemas.py src/chess_ml_coach/web/app.py web/src/LegacyApp.tsx web/src/AdaptiveProgress.test.tsx README.md
 git commit -m "feat: report adaptive training progress"
@@ -343,7 +318,7 @@ git commit -m "feat: report adaptive training progress"
 
 ---
 
-### Task 6: Full regression verification, PR, and merge gate
+### Task 6: Full verification, PR, and merge gate
 
 **Files:**
 - Review all changed files; no intended production edits unless a verified failure is found.
@@ -355,8 +330,6 @@ ruff check src tests
 pytest --cov=chess_ml_coach --cov-report=term-missing
 ```
 
-Expected: all tests pass; existing Quick, profiles, explanation, pipeline cancellation/SSE, and analyzer tests remain green.
-
 - [ ] **Step 2: Run complete frontend verification**
 
 ```bash
@@ -366,16 +339,14 @@ npm run test:run
 npm run build
 ```
 
-Expected: all tests and TypeScript/Vite production build pass, including stale-build fingerprint generation.
+- [ ] **Step 3: Review invariants**
 
-- [ ] **Step 3: Review diff for invariants**
+Confirm full-game analysis lock behavior and `ANALYSIS_COLUMNS` are unchanged, profile paths remain per-player, no adaptive API response leaks the future expected user move, terminal retries create exactly one review, explanation remains post-attempt/post-sequence, and Quick still records one review after its first move.
 
-Confirm `src/chess_ml_coach/engine.py` full-game analysis lock behavior and `ANALYSIS_COLUMNS` are unchanged, profile paths remain per-player, no API response leaks the next expected user move, and Quick mode still records one review immediately after its first move.
+- [ ] **Step 4: Open draft PR and verify exact-head CI**
 
-- [ ] **Step 4: Open a draft PR and verify exact-head CI**
-
-The existing workflow should produce one PR workflow with the `python` and `web` jobs. Wait for both jobs on the exact final head SHA; do not merge based on an older green run.
+The deduplicated workflow must create one PR run containing the `python` and `web` jobs. Wait for both jobs on the exact final head SHA; do not use an older green run.
 
 - [ ] **Step 5: Mark ready and merge only when exact-head CI is green**
 
-Use squash merge unless repository state requires otherwise. Record the final merge SHA and the final Python/frontend counts in the completion message.
+Use squash merge unless repository state requires otherwise. Report the merge SHA and final Python/frontend test counts.
