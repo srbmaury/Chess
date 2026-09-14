@@ -141,6 +141,7 @@ function PipelinePage() {
   const [status, setStatus] = useState<Record<string, any> | null>(null)
   const [depth, setDepth] = useState(14)
   const [error, setError] = useState('')
+  const [streamGeneration, setStreamGeneration] = useState(0)
   const refresh = useCallback(() => api.pipelineStatus().then(setStatus).catch((x: Error) => setError(x.message)), [])
   useEffect(() => {
     refresh()
@@ -148,14 +149,18 @@ function PipelinePage() {
     stream.onmessage = (event) => {
       const progress = JSON.parse(event.data)
       setStatus((old) => ({ ...old, ...progress, progress }))
+      if (['succeeded', 'failed', 'cancelled'].includes(progress.status)) {
+        stream.close()
+      }
     }
     return () => stream.close()
-  }, [refresh])
+  }, [refresh, streamGeneration])
 
   async function start(stage: string) {
     try {
       setError('')
       setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined))
+      setStreamGeneration((value) => value + 1)
       window.setTimeout(refresh, 250)
     } catch (x) {
       setError((x as Error).message)
