@@ -8,7 +8,8 @@ from typing import Annotated, TypeVar
 import typer
 
 from . import services
-from .config import Settings, get_settings as _get_root_settings
+from .config import Settings
+from .config import get_settings as _get_root_settings
 from .profiles import ProfileManager
 
 app = typer.Typer(no_args_is_help=True)
