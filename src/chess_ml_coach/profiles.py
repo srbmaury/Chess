@@ -171,6 +171,44 @@ class ProfileManager:
         self._save_registry(registry)
         return self._record_from_payload(key, payload)
 
+    def delete_profile(self, username: str) -> None:
+        """Permanently remove one local player's artifacts and registry metadata."""
+        key = canonicalize_username(username)
+        scoped = self.settings_for(key)
+        registry = self._load_registry()
+        profiles = dict(registry.get("profiles", {}))
+        profile_paths = (scoped.data_dir, scoped.model_dir)
+        marker_owner = None
+
+        if self.migration_marker.exists():
+            try:
+                marker = json.loads(self.migration_marker.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"Cannot read profile migration marker: {self.migration_marker}"
+                ) from exc
+            if isinstance(marker, dict) and marker.get("owner_username"):
+                marker_owner = canonicalize_username(str(marker["owner_username"]))
+
+        known = key in profiles or any(path.exists() or path.is_symlink() for path in profile_paths)
+        if not known:
+            raise KeyError(f"Unknown player profile: {username}")
+
+        for path in profile_paths:
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+
+        profiles.pop(key, None)
+        registry["profiles"] = profiles
+        if registry.get("active_username") == key:
+            registry["active_username"] = None
+        self._save_registry(registry)
+
+        if marker_owner == key:
+            self.migration_marker.unlink(missing_ok=True)
+
     def _legacy_files(self, scoped: Settings) -> list[tuple[Path, Path]]:
         pairs: list[tuple[Path, Path]] = []
         for dirname in _LEGACY_DATA_DIRS:
