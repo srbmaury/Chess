@@ -17,11 +17,8 @@ from .config import MoveQualityThresholds, Settings
 from .locking import ProfileBusyError, exclusive_profile_lock
 from .move_quality import (
     MATE_CP,
-    MoveAssessment,
-    ScoreSnapshot,
     alternatives_show_uniqueness,
     classify_move_quality,
-    display_loss_pawns,
     sacrifices_material_after_reply,
     score_snapshot,
 )
