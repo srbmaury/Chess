@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 
 vi.mock('react-chessboard', () => ({
@@ -11,28 +11,50 @@ vi.mock('react-chessboard', () => ({
 
 import App from './App'
 
+const activeProfiles = {
+  active_username: 'srbmaury',
+  profiles: [{ username: 'srbmaury', display_username: 'srbmaury' }],
+}
+
+function commonResponse(url: string) {
+  if (url === '/api/profiles') {
+    return { ok: true, json: async () => activeProfiles } as Response
+  }
+  if (url === '/api/pipeline/status') {
+    return { ok: true, json: async () => ({ status: 'idle', stage: null }) } as Response
+  }
+  return null
+}
 
 test('renders dashboard metrics from the local API', async () => {
   window.history.pushState({}, '', '/')
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        analyzed_moves: 6434,
-        training: {
-          total_puzzles: 100,
-          due_puzzles: 12,
-          reviewed_puzzles: 40,
-          mastered_puzzles: 7,
-          total_reviews: 80,
-          accuracy: 0.75,
-        },
-        artifacts: {
-          analysis: { exists: true, rows: 6434 },
-          features: { exists: true, rows: 6434 },
-        },
-      }),
+    vi.fn(async (input: unknown) => {
+      const url = String(input)
+      const common = commonResponse(url)
+      if (common) return common
+      if (url === '/api/dashboard') {
+        return {
+          ok: true,
+          json: async () => ({
+            analyzed_moves: 6434,
+            training: {
+              total_puzzles: 100,
+              due_puzzles: 12,
+              reviewed_puzzles: 40,
+              mastered_puzzles: 7,
+              total_reviews: 80,
+              accuracy: 0.75,
+            },
+            artifacts: {
+              analysis: { exists: true, rows: 6434 },
+              features: { exists: true, rows: 6434 },
+            },
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
     }),
   )
 
@@ -44,11 +66,12 @@ test('renders dashboard metrics from the local API', async () => {
   expect(await screen.findByText('6,434')).toBeTruthy()
 })
 
-
 test('reveals why the best move is best only after a practice attempt', async () => {
   window.history.pushState({}, '', '/practice')
   const fetchMock = vi.fn(async (input: unknown) => {
     const url = String(input)
+    const common = commonResponse(url)
+    if (common) return common
     if (url.endsWith('/api/practice/next')) {
       return {
         ok: true,
@@ -115,4 +138,58 @@ test('reveals why the best move is best only after a practice attempt', async ()
   expect(await screen.findByText('d4 d5 Nc3')).toBeTruthy()
   expect(await screen.findByText(/lost 2.50 pawns/)).toBeTruthy()
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/explanation'))).toBe(true)
+})
+
+test('requires a Chess.com username before loading a fresh community workspace', async () => {
+  window.history.pushState({}, '', '/')
+  const fetchMock = vi.fn(async (input: unknown) => {
+    const url = String(input)
+    if (url === '/api/profiles') {
+      return { ok: true, json: async () => ({ active_username: null, profiles: [] }) } as Response
+    }
+    if (url === '/api/pipeline/status') {
+      return { ok: true, json: async () => ({ status: 'idle', stage: null }) } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<App />)
+
+  expect(await screen.findByText('Choose your Chess.com player')).toBeTruthy()
+  expect(screen.getByRole('textbox', { name: 'Chess.com username' })).toBeTruthy()
+  expect(screen.queryByText('Your training cockpit')).toBeNull()
+  expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/dashboard')).toBe(false)
+})
+
+test('shows Stop inside Pipeline while Stockfish analyze is running', async () => {
+  window.history.pushState({}, '', '/pipeline')
+  class FakeEventSource {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor(_url: string) {}
+    close() {}
+  }
+  vi.stubGlobal('EventSource', FakeEventSource)
+
+  const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+    const url = String(input)
+    if (url === '/api/profiles') {
+      return { ok: true, json: async () => activeProfiles } as Response
+    }
+    if (url === '/api/pipeline/status') {
+      return { ok: true, json: async () => ({ status: 'running', stage: 'analyze', username: 'srbmaury' }) } as Response
+    }
+    if (url === '/api/pipeline/stop' && init?.method === 'POST') {
+      return { ok: true, json: async () => ({ status: 'stopping', stage: 'analyze', username: 'srbmaury' }) } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<App />)
+
+  const stop = await screen.findByRole('button', { name: 'Stop' })
+  fireEvent.click(stop)
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/pipeline/stop' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
 })
