@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { expect, test, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, expect, test, vi } from 'vitest'
 
 vi.mock('react-chessboard', () => ({
   Chessboard: ({ options }: { options: { onPieceDrop?: (move: { sourceSquare: string; targetSquare: string }) => boolean } }) => (
@@ -10,6 +10,11 @@ vi.mock('react-chessboard', () => ({
 }))
 
 import App from './App'
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const activeProfiles = {
   active_username: 'srbmaury',
