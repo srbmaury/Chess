@@ -27,6 +27,16 @@ def test_score_snapshot_preserves_mate_direction_for_both_colors():
     assert black.expected_score < 0.01
 
 
+def test_score_snapshot_distinguishes_mate_given_from_being_mated():
+    mate_given = chess.engine.PovScore(chess.engine.MateGiven, chess.WHITE)
+    mated = chess.engine.PovScore(chess.engine.Mate(0), chess.WHITE)
+
+    assert score_snapshot(mate_given, chess.WHITE).mate == 0
+    assert score_snapshot(mate_given, chess.WHITE).expected_score == 1.0
+    assert score_snapshot(mated, chess.WHITE).mate == 0
+    assert score_snapshot(mated, chess.WHITE).expected_score == 0.0
+
+
 def test_exact_engine_move_is_best():
     assessment = classify_move_quality(
         before=snapshot(cp=35, expected=0.58),
