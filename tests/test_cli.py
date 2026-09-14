@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from chess_ml_coach.cli import app
 from chess_ml_coach.config import MoveQualityThresholds, Settings
+from chess_ml_coach.profiles import ProfileManager
 from chess_ml_coach.puzzles import PuzzleSeed
 from chess_ml_coach.training import TrainingStore
 
@@ -228,3 +229,62 @@ def test_progress_prints_human_training_summary(tmp_path: Path):
     assert "Reviewed: 1" in result.stdout
     assert "Review accuracy: 100.0%" in result.stdout
     assert "positional / calculation" in result.stdout
+
+
+def test_delete_user_data_requires_exact_confirmation(tmp_path: Path):
+    data_root = tmp_path / "data"
+    model_root = tmp_path / "models"
+    root = Settings(data_dir=data_root, model_dir=model_root)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    artifact = manager.settings_for("alice").data_dir / "raw" / "games.pgn"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("game", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "delete-user-data",
+            "--username",
+            "alice",
+            "--data-dir",
+            str(data_root),
+            "--model-dir",
+            str(model_root),
+        ],
+        input="bob\n",
+    )
+
+    assert result.exit_code == 1
+    assert "Deletion cancelled" in result.stdout
+    assert artifact.exists()
+
+
+def test_delete_user_data_yes_removes_named_profile(tmp_path: Path):
+    data_root = tmp_path / "data"
+    model_root = tmp_path / "models"
+    root = Settings(data_dir=data_root, model_dir=model_root)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    artifact = manager.settings_for("alice").data_dir / "raw" / "games.pgn"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("game", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "delete-user-data",
+            "--username",
+            "ALICE",
+            "--data-dir",
+            str(data_root),
+            "--model-dir",
+            str(model_root),
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Permanently deleted local data for 'alice'" in result.stdout
+    assert not artifact.exists()
+    assert manager.list_profiles() == []
