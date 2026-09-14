@@ -32,8 +32,8 @@ def test_daily_time_control_is_not_lumped_into_unknown():
     assert time_control_category("1/86400") == "daily"
 
 
-def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
-    games = pd.DataFrame([
+def _game() -> pd.DataFrame:
+    return pd.DataFrame([
         {
             "game_id": "g1",
             "game_date": pd.Timestamp("2026-09-01"),
@@ -49,6 +49,10 @@ def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
             "source_url": "url",
         }
     ])
+
+
+def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
+    games = _game()
     moves = pd.DataFrame([
         {"game_id": "g1", "ply": 1, "fullmove_number": 1, "color": "white", "fen_before": START_FEN, "fen_after": START_FEN, "san": "e4", "uci": "e2e4", "is_user_move": True, "clock_seconds": 600.0},
         {"game_id": "g1", "ply": 2, "fullmove_number": 1, "color": "black", "fen_before": START_FEN, "fen_after": START_FEN, "san": "e5", "uci": "e7e5", "is_user_move": False, "clock_seconds": 600.0},
@@ -63,3 +67,19 @@ def test_feature_dataset_keeps_only_user_moves_and_builds_binary_target():
     assert frame.significant_mistake.tolist() == [0, 1]
     assert frame.time_control_category.tolist() == ["rapid", "rapid"]
     assert frame.rating_difference.tolist() == [-10, -10]
+
+
+def test_binary_target_uses_quality_not_raw_cpl_after_v3_scoring():
+    games = _game()
+    moves = pd.DataFrame([
+        {"game_id": "g1", "ply": 1, "fullmove_number": 1, "color": "white", "fen_before": START_FEN, "fen_after": START_FEN, "san": "e4", "uci": "e2e4", "is_user_move": True, "clock_seconds": 600.0},
+        {"game_id": "g1", "ply": 3, "fullmove_number": 2, "color": "white", "fen_before": START_FEN, "fen_after": START_FEN, "san": "Nf3", "uci": "g1f3", "is_user_move": True, "clock_seconds": 595.0},
+    ])
+    analysis = pd.DataFrame([
+        {"game_id": "g1", "ply": 1, "best_move_uci": "d2d4", "eval_before_cp": 900, "eval_after_cp": 400, "cpl": 500, "quality": "good", "engine_config_hash": "x"},
+        {"game_id": "g1", "ply": 3, "best_move_uci": "d2d4", "eval_before_cp": 500, "eval_after_cp": 450, "cpl": 50, "quality": "miss", "engine_config_hash": "x"},
+    ])
+
+    frame = build_feature_dataset(games, moves, analysis, MoveQualityThresholds())
+
+    assert frame.significant_mistake.tolist() == [0, 1]
