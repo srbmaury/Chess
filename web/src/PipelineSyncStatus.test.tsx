@@ -47,7 +47,7 @@ function emit(source: { onmessage: ((event: MessageEvent) => void) | null } | nu
   source?.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
 }
 
-test('labels sync archive progress as months', async () => {
+test('shows sync progress in months', async () => {
   window.history.pushState({}, '', '/pipeline')
   const getSource = installPipeline({ status: 'running', stage: 'sync', username: 'srbmaury' })
 
@@ -57,21 +57,22 @@ test('labels sync archive progress as months', async () => {
   emit(getSource(), {
     stage: 'sync',
     status: 'running',
-    current: 7,
-    total: 25,
-    archive: 'https://api.chess.com/pub/player/srbmaury/games/2026/03',
-    game_count: 321,
-    skipped: false,
+    current_month: 7,
+    total_months: 25,
+    archive_month: '2026-03',
+    games_synced: 321,
+    archive_skipped: false,
   })
 
-  expect(await screen.findByText('Current month')).toBeTruthy()
-  expect(screen.getByText('Total months')).toBeTruthy()
-  expect(screen.getByText('Games synced')).toBeTruthy()
+  expect(await screen.findByText('current month')).toBeTruthy()
+  expect(screen.getByText('total months')).toBeTruthy()
+  expect(screen.getByText('games synced')).toBeTruthy()
+  expect(screen.getByText('archive month')).toBeTruthy()
   expect(screen.getByText('7')).toBeTruthy()
   expect(screen.getByText('25')).toBeTruthy()
 })
 
-test('labels analyze and puzzles progress with meaningful units', async () => {
+test('shows analyze and puzzles progress with meaningful units', async () => {
   window.history.pushState({}, '', '/pipeline')
   const getSource = installPipeline({ status: 'running', stage: 'analyze', username: 'srbmaury' })
 
@@ -81,76 +82,73 @@ test('labels analyze and puzzles progress with meaningful units', async () => {
   emit(getSource(), {
     stage: 'analyze',
     status: 'running',
-    completed: 121537,
-    total: 211639,
-    reused: 120000,
-    analyzed: 1537,
+    completed_moves: 121537,
+    total_user_moves: 211639,
+    reused_analyses: 120000,
+    newly_analyzed_moves: 1537,
   })
 
-  expect(await screen.findByText('Completed moves')).toBeTruthy()
-  expect(screen.getByText('Total user moves')).toBeTruthy()
-  expect(screen.getByText('Reused analyses')).toBeTruthy()
-  expect(screen.getByText('Newly analyzed moves')).toBeTruthy()
+  expect(await screen.findByText('completed moves')).toBeTruthy()
+  expect(screen.getByText('total user moves')).toBeTruthy()
+  expect(screen.getByText('reused analyses')).toBeTruthy()
+  expect(screen.getByText('newly analyzed moves')).toBeTruthy()
 
   emit(getSource(), {
     stage: 'puzzles',
     status: 'running',
-    current: 1000,
-    total: 121537,
-    eligible: 213,
+    processed_feature_rows: 1000,
+    total_feature_rows: 121537,
+    eligible_puzzles: 213,
   })
 
-  expect(await screen.findByText('Processed feature rows')).toBeTruthy()
-  expect(screen.getByText('Total feature rows')).toBeTruthy()
-  expect(screen.getByText('Eligible puzzles')).toBeTruthy()
+  expect(await screen.findByText('processed feature rows')).toBeTruthy()
+  expect(screen.getByText('total feature rows')).toBeTruthy()
+  expect(screen.getByText('eligible puzzles')).toBeTruthy()
 })
 
-test('renders pipeline result fields recursively instead of object strings', async () => {
+test('renders flattened train results instead of object strings', async () => {
   window.history.pushState({}, '', '/pipeline')
-  installPipeline({
-    status: 'succeeded',
-    stage: 'train',
-    username: 'srbmaury',
-    result: {
-      model_path: '/tmp/mistake_model.joblib',
-      metadata_path: '/tmp/mistake_model.metadata.json',
-      metrics: {
-        roc_auc: 0.82,
-        pr_auc: 0.64,
-      },
-    },
-  })
+  const getSource = installPipeline({ status: 'running', stage: 'train', username: 'srbmaury' })
 
   render(<App />)
+  expect(await screen.findByText('Build your coach')).toBeTruthy()
 
-  expect(await screen.findByText('Train result')).toBeTruthy()
-  expect(screen.getByText('Model path')).toBeTruthy()
-  expect(screen.getByText('ROC AUC')).toBeTruthy()
+  emit(getSource(), {
+    stage: 'train',
+    status: 'succeeded',
+    model_file: '/tmp/mistake_model.joblib',
+    metadata_file: '/tmp/mistake_model.metadata.json',
+    metrics_roc_auc: 0.82,
+    metrics_pr_auc: 0.64,
+  })
+
+  expect(await screen.findByText('model file')).toBeTruthy()
+  expect(screen.getByText('metrics roc auc')).toBeTruthy()
   expect(screen.getByText('0.82')).toBeTruthy()
-  expect(screen.getByText('PR AUC')).toBeTruthy()
+  expect(screen.getByText('metrics pr auc')).toBeTruthy()
   expect(screen.getByText('0.64')).toBeTruthy()
   expect(screen.queryByText('[object Object]')).toBeNull()
 })
 
-test('uses stage-specific result labels for sync', async () => {
+test('renders sync result fields instead of an object string', async () => {
   window.history.pushState({}, '', '/pipeline')
-  installPipeline({
-    status: 'succeeded',
-    stage: 'sync',
-    username: 'srbmaury',
-    result: {
-      downloaded: 18,
-      total: 339,
-      pgn_path: '/tmp/srbmaury_all_games.pgn',
-    },
-  })
+  const getSource = installPipeline({ status: 'running', stage: 'sync', username: 'srbmaury' })
 
   render(<App />)
+  expect(await screen.findByText('Build your coach')).toBeTruthy()
 
-  expect(await screen.findByText('Sync result')).toBeTruthy()
-  expect(screen.getByText('Downloaded games')).toBeTruthy()
+  emit(getSource(), {
+    stage: 'sync',
+    status: 'succeeded',
+    downloaded_games: 18,
+    total_games: 339,
+    pgn_file: '/tmp/srbmaury_all_games.pgn',
+  })
+
+  expect(await screen.findByText('downloaded games')).toBeTruthy()
   expect(screen.getByText('18')).toBeTruthy()
-  expect(screen.getByText('Total games')).toBeTruthy()
+  expect(screen.getByText('total games')).toBeTruthy()
   expect(screen.getByText('339')).toBeTruthy()
+  expect(screen.getByText('pgn file')).toBeTruthy()
   expect(screen.queryByText('[object Object]')).toBeNull()
 })
