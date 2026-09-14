@@ -193,3 +193,19 @@ def test_pipeline_sse_serializes_retained_events_and_closes_after_terminal(tmp_p
     assert payloads
     assert any(payload.get("completed") == 1 for payload in payloads)
     assert payloads[-1]["status"] == "succeeded"
+
+
+def test_pipeline_sse_default_starts_after_retained_terminal_history(tmp_path: Path):
+    def fake_runner(settings, progress):
+        progress({"completed": 1, "total": 1, "reused": 0, "analyzed": 1})
+        return {"rows": 1}
+
+    manager = PipelineManager(_settings(tmp_path), runners={"analyze": fake_runner})
+    client = TestClient(create_app(_settings(tmp_path), pipeline_manager=manager))
+    response = client.post("/api/pipeline/analyze")
+    assert response.status_code == 202
+    assert _wait_for_terminal(manager).status == "succeeded"
+
+    events_response = client.get("/api/pipeline/events")
+    assert events_response.status_code == 200
+    assert "data: " not in events_response.text
