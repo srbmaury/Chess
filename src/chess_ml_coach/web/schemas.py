@@ -40,7 +40,9 @@ class AttemptResponse(BaseModel):
     best_move_san: str
     best_move_uci: str
     your_game_move: str
-    evaluation_loss_pawns: float
+    evaluation_loss_pawns: float | None
+    quality: str
+    quality_reason: str
     next_interval_days: int
     next_review_at: datetime
     source_url: str | None = None
@@ -120,8 +122,9 @@ class PuzzleItem(BaseModel):
     your_move_uci: str
     best_move_san: str
     best_move_uci: str
-    evaluation_loss_pawns: float
+    evaluation_loss_pawns: float | None
     quality: str
+    quality_reason: str
     opening: str
     eco: str
     phase: str
