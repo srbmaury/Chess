@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import click
+import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -34,6 +35,25 @@ def test_served_app_requires_built_frontend(tmp_path: Path):
         assert "npm run build" in str(exc)
     else:
         raise AssertionError("expected missing frontend build to fail")
+
+
+def test_served_app_rejects_stale_frontend_bundle(tmp_path: Path):
+    web_root = tmp_path / "web"
+    source = web_root / "src"
+    dist = web_root / "dist"
+    source.mkdir(parents=True)
+    dist.mkdir()
+    (source / "App.tsx").write_text("export default function App(){return null}", encoding="utf-8")
+    (web_root / "package.json").write_text('{"scripts":{"build":"vite build"}}', encoding="utf-8")
+    (dist / "index.html").write_text("<html><body>old build</body></html>", encoding="utf-8")
+    (dist / ".source-fingerprint").write_text("stale", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="frontend build is stale"):
+        create_served_app(
+            Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models"),
+            static_dir=dist,
+            source_dir=web_root,
+        )
 
 
 def test_cli_exposes_ui_and_defaults_to_localhost():
