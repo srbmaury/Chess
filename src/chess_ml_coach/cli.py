@@ -336,7 +336,7 @@ def delete_user_data(
         confirmation = typer.prompt(
             f"Type '{key}' to permanently delete this player's local data"
         )
-        if confirmation.strip().lower() != key:
+        if confirmation.strip() != key:
             typer.echo("Deletion cancelled.")
             raise typer.Exit(code=1)
 
