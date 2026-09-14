@@ -4,6 +4,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..move_quality import display_loss_pawns, stored_quality_reason
+
 
 def _connect(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
@@ -15,6 +17,9 @@ def _connect(path: Path) -> sqlite3.Connection:
 def _puzzle_payload(row: sqlite3.Row) -> dict[str, object]:
     attempts = int(row["attempts"])
     correct_attempts = int(row["correct_attempts"])
+    cpl = int(row["cpl"])
+    quality = str(row["quality"])
+    quality_reason = stored_quality_reason(quality, cpl)
     return {
         "puzzle_id": str(row["puzzle_id"]),
         "fen": str(row["fen_before"]),
@@ -25,8 +30,9 @@ def _puzzle_payload(row: sqlite3.Row) -> dict[str, object]:
         "your_move_uci": str(row["your_move_uci"]),
         "best_move_san": str(row["best_move_san"]),
         "best_move_uci": str(row["best_move_uci"]),
-        "evaluation_loss_pawns": round(int(row["cpl"]) / 100.0, 2),
-        "quality": str(row["quality"]),
+        "evaluation_loss_pawns": display_loss_pawns(cpl, quality_reason),
+        "quality": quality,
+        "quality_reason": quality_reason,
         "opening": str(row["opening"]),
         "eco": str(row["eco"]),
         "phase": str(row["game_phase"]),
