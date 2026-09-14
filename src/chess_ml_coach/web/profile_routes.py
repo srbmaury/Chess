@@ -96,6 +96,7 @@ def enable_profiles(
     settings: Settings,
     *,
     manager: ProfileManager | None = None,
+    initial_username: str | None = None,
 ) -> ProfileManager:
     roots = _root_settings(settings)
     profiles = manager or ProfileManager(roots)
@@ -105,10 +106,18 @@ def enable_profiles(
         profiles.root_settings = roots
         profiles.registry_path = roots.data_dir / "profiles.json"
         profiles.migration_marker = roots.data_dir / ".profiles-migrated.json"
+
+    # Legacy data belongs to the configured/default owner and migration activates
+    # that profile. A truly fresh install has no legacy data and therefore remains
+    # unselected until the person enters a Chess.com username in the web UI.
     profiles.migrate_legacy(roots.username)
-    profiles.create_or_activate(settings.username, activate=True)
+    if initial_username is not None:
+        profiles.create_or_activate(initial_username, activate=True)
+
     app.state.root_settings = roots
     app.state.profile_manager = profiles
-    _apply_active_settings(app, settings.username)
+    active_username = profiles.active_username()
+    if active_username is not None:
+        _apply_active_settings(app, active_username)
     app.include_router(router)
     return profiles
