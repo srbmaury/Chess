@@ -84,6 +84,10 @@ class PipelineManager:
         with self._lock:
             return [event for event in self._events if event.sequence > after_sequence]
 
+    def latest_sequence(self) -> int:
+        with self._lock:
+            return self._sequence
+
     def _record_event(self, payload: dict[str, object]) -> PipelineEvent:
         with self._lock:
             self._sequence += 1
