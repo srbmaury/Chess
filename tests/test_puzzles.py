@@ -21,6 +21,7 @@ def _frame() -> pd.DataFrame:
                 "best_move_uci": "d2d4",
                 "cpl": 250,
                 "quality": "blunder",
+                "quality_reason": "large drop in expected score",
                 "white": "srbmaury",
                 "black": "opponent",
                 "opening": "King's Pawn Opening",
@@ -46,7 +47,22 @@ def test_extracts_stable_human_readable_puzzle_seed():
     assert puzzle.best_move_san == "d4"
     assert puzzle.best_move_uci == "d2d4"
     assert puzzle.eval_loss_pawns == 2.5
+    assert puzzle.quality_reason == "large drop in expected score"
     assert puzzle.difficulty in {1, 2, 3, 4, 5}
+
+
+def test_miss_is_training_worthy_and_forced_mate_loss_is_not_shown_as_pawns():
+    frame = _frame()
+    frame.loc[0, "quality"] = "miss"
+    frame.loc[0, "quality_reason"] = "forced mate was available"
+    frame.loc[0, "cpl"] = 99_808
+
+    puzzles = extract_puzzles(frame)
+
+    assert len(puzzles) == 1
+    assert puzzles[0].quality == "miss"
+    assert puzzles[0].quality_reason == "forced mate was available"
+    assert puzzles[0].eval_loss_pawns is None
 
 
 def test_same_move_false_blunder_is_excluded():
