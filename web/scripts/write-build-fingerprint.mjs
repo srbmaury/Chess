@@ -20,6 +20,10 @@ const files = [
   ...await walk(join(root, 'src')),
   join(root, 'index.html'),
   join(root, 'package.json'),
+  join(root, 'tsconfig.json'),
+  join(root, 'tsconfig.app.json'),
+  join(root, 'vite.config.ts'),
+  join(root, 'scripts/write-build-fingerprint.mjs'),
 ].sort()
 
 const hash = createHash('sha256')
