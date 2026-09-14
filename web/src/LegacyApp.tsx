@@ -103,6 +103,16 @@ const decimal = (value: number | null) => value == null ? '—' : value.toFixed(
 const ADAPTIVE_ENGINE_REPLY_DELAY_MS = 350
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 
+function fenAfterUciMove(fen: string, moveUci: string): string | null {
+  try {
+    const board = new Chess(fen)
+    const played = board.move({ from: moveUci.slice(0, 2), to: moveUci.slice(2, 4), promotion: moveUci.length === 5 ? moveUci[4] : undefined })
+    return played ? board.fen() : null
+  } catch {
+    return null
+  }
+}
+
 function buildAdaptiveHistory(startFen: string, steps: AdaptiveSafeStep[]): AdaptiveHistoryEntry[] {
   const history: AdaptiveHistoryEntry[] = [{ fen: startFen, step: null }]
   let board: Chess
@@ -152,6 +162,7 @@ function PracticePage() {
   const [adaptiveHint, setAdaptiveHint] = useState<AdaptiveHint | null>(null)
   const [hinting, setHinting] = useState(false)
   const [historyPly, setHistoryPly] = useState<number | null>(null)
+  const [pendingAdaptiveFen, setPendingAdaptiveFen] = useState<string | null>(null)
   const [explanation, setExplanation] = useState<Explanation | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [explanationError, setExplanationError] = useState('')
@@ -167,6 +178,7 @@ function PracticePage() {
     setAdaptiveHint(null)
     setHinting(false)
     setHistoryPly(null)
+    setPendingAdaptiveFen(null)
     setExplanation(null)
     setExplaining(false)
     setExplanationError('')
@@ -194,7 +206,7 @@ function PracticePage() {
   const reviewingHistory = mode === 'adaptive' && adaptive != null && historyPly != null && requestedHistoryPly < liveHistoryPly
   const viewedHistoryPly = reviewingHistory ? requestedHistoryPly : liveHistoryPly
   const boardFen = mode === 'adaptive' && adaptive
-    ? (reviewingHistory ? history[viewedHistoryPly]?.fen ?? adaptive.current_fen : adaptive.current_fen)
+    ? (reviewingHistory ? history[viewedHistoryPly]?.fen ?? adaptive.current_fen : pendingAdaptiveFen ?? adaptive.current_fen)
     : puzzle?.fen
 
   async function submitMove(moveUci: string) {
@@ -210,9 +222,15 @@ function PracticePage() {
           session = await api.adaptiveStart(puzzle.puzzle_id)
           setAdaptive(session)
         }
+        const previewFen = fenAfterUciMove(session.current_fen, moveUci)
+        const replyDelay = previewFen ? wait(ADAPTIVE_ENGINE_REPLY_DELAY_MS) : null
+        if (previewFen) {
+          setPendingAdaptiveFen(previewFen)
+        }
+        setLastAdaptiveMove(null)
         const result = await api.adaptiveMove(session.session_id, moveUci)
-        if (result.accepted === true && result.engine_reply_uci) {
-          await wait(ADAPTIVE_ENGINE_REPLY_DELAY_MS)
+        if (result.accepted === true && result.engine_reply_uci && replyDelay) {
+          await replyDelay
         }
         setLastAdaptiveMove(result)
         if (adaptiveHint && result.current_fen !== adaptiveHint.current_fen) {
@@ -236,6 +254,7 @@ function PracticePage() {
     } catch (x) {
       setError((x as Error).message)
     } finally {
+      setPendingAdaptiveFen(null)
       setSubmitting(false)
     }
   }
@@ -267,6 +286,7 @@ function PracticePage() {
       setAdaptiveHint(null)
       setHinting(false)
       setHistoryPly(null)
+      setPendingAdaptiveFen(null)
       setExplanation(null)
       setExplanationError('')
       if (next === 'adaptive' && puzzle) {
