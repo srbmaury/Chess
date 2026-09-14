@@ -11,6 +11,15 @@ from ..config import Settings
 from .app import create_app
 from .profile_routes import enable_profiles
 
+_BUILD_INPUTS = (
+    "index.html",
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "vite.config.ts",
+    "scripts/write-build-fingerprint.mjs",
+)
+
 
 def default_frontend_dist() -> Path:
     return Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -18,7 +27,7 @@ def default_frontend_dist() -> Path:
 
 def _frontend_source_fingerprint(root: Path) -> str:
     files = [path for path in (root / "src").rglob("*") if path.is_file()]
-    files.extend(path for path in (root / "index.html", root / "package.json") if path.is_file())
+    files.extend(path for name in _BUILD_INPUTS if (path := root / name).is_file())
     digest = hashlib.sha256()
     for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
         digest.update(path.relative_to(root).as_posix().encode())
