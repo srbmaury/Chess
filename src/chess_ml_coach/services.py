@@ -38,7 +38,7 @@ def run_analyze(settings: Settings, progress: ProgressCallback | None = None) ->
     return {"rows": len(analysis), "output": output}
 
 
-def _ensure_analysis_complete(moves, analysis) -> None:
+def _analysis_coverage(moves, analysis) -> tuple[int, int]:
     user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)]
     expected = {
         (str(row.game_id), int(row.ply))
@@ -48,13 +48,7 @@ def _ensure_analysis_complete(moves, analysis) -> None:
         (str(row.game_id), int(row.ply))
         for row in analysis[["game_id", "ply"]].itertuples(index=False)
     }
-    missing = expected - analyzed
-    if missing:
-        completed = len(expected) - len(missing)
-        raise RuntimeError(
-            f"Analysis is incomplete: {completed}/{len(expected)} user moves analyzed. "
-            "Please resume Analyze before building Features."
-        )
+    return len(expected & analyzed), len(expected)
 
 
 def run_features(settings: Settings) -> dict:
@@ -71,11 +65,21 @@ def run_features(settings: Settings) -> dict:
             raise FileNotFoundError(f"Missing prerequisite {path}")
     games, moves = read_normalized(settings.data_dir / "processed")
     analysis = pd.read_parquet(analysis_path)
-    _ensure_analysis_complete(moves, analysis)
+    analyzed_user_moves, total_user_moves = _analysis_coverage(moves, analysis)
+    if analyzed_user_moves == 0:
+        raise RuntimeError(
+            "No analyzed user moves are available. Run Analyze before building Features."
+        )
     frame = build_feature_dataset(games, moves, analysis, settings.thresholds)
     output = settings.data_dir / "processed" / "features.parquet"
     write_feature_dataset(frame, output)
-    return {"rows": len(frame), "output": output}
+    return {
+        "rows": len(frame),
+        "output": output,
+        "analyzed_user_moves": analyzed_user_moves,
+        "total_user_moves": total_user_moves,
+        "analysis_complete": analyzed_user_moves == total_user_moves,
+    }
 
 
 def run_train(settings: Settings, progress: ProgressCallback | None = None) -> dict:
