@@ -46,6 +46,58 @@ class AttemptResponse(BaseModel):
     source_url: str | None = None
 
 
+class AdaptiveSafeStep(BaseModel):
+    step_index: int
+    side: str
+    move_uci: str
+    move_san: str
+    accepted: bool
+
+
+class AdaptiveReviewResult(BaseModel):
+    next_interval_days: int
+    next_review_at: datetime
+    consecutive_correct: int
+    mastered: bool
+
+
+class AdaptiveStartResponse(BaseModel):
+    session_id: str
+    puzzle_id: str
+    status: str
+    current_fen: str
+    orientation: str
+    user_moves_attempted: int
+    user_moves_accepted: int
+    current_ply: int
+    max_eval_loss_cp: int
+    max_user_decisions: int = 4
+    steps: list[AdaptiveSafeStep]
+    review: AdaptiveReviewResult | None = None
+
+
+class AdaptiveMoveRequest(BaseModel):
+    move_uci: str = Field(min_length=4, max_length=5)
+
+
+class AdaptiveMoveResponse(BaseModel):
+    session_id: str
+    puzzle_id: str
+    status: str
+    accepted: bool | None
+    move_uci: str | None = None
+    move_san: str | None = None
+    eval_loss_cp: int | None = None
+    engine_reply_uci: str | None = None
+    engine_reply_san: str | None = None
+    current_fen: str
+    user_moves_attempted: int
+    user_moves_accepted: int
+    current_ply: int
+    max_eval_loss_cp: int
+    review: AdaptiveReviewResult | None = None
+
+
 class PuzzleItem(BaseModel):
     puzzle_id: str
     fen: str
