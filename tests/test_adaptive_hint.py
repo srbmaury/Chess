@@ -5,6 +5,7 @@ from pathlib import Path
 import chess
 import chess.engine
 
+from chess_ml_coach.adaptive_hint import reveal_next_move
 from chess_ml_coach.adaptive_practice import AdaptivePracticeService
 from chess_ml_coach.adaptive_store import AdaptiveSessionStore
 from chess_ml_coach.config import Settings
@@ -23,7 +24,7 @@ def _position(*moves: str) -> chess.Board:
 
 def _info(cp: int, *pv: str) -> dict:
     return {
-        "score": chess.engine.PovScore(chess.engine.Cp(cp), chess.WHITE),
+        "score": chess.engine.PovScore(score, chess.WHITE),
         "pv": [chess.Move.from_uci(move) for move in pv],
     }
 
@@ -95,8 +96,8 @@ def test_revealing_next_move_is_idempotent_for_same_session_and_marks_assistance
     service, training, puzzle = _service(tmp_path, engine)
     session = service.start(puzzle)
 
-    first = service.reveal_next_move(session.session_id)
-    second = service.reveal_next_move(session.session_id)
+    first = reveal_next_move(service, session.session_id)
+    second = reveal_next_move(service, session.session_id)
 
     assert first.move_uci == "d2d4"
     assert first.move_san == "d4"
@@ -127,7 +128,7 @@ def test_finishing_after_revealing_a_hint_records_an_incorrect_review(tmp_path: 
     service, training, puzzle = _service(tmp_path, engine)
     session = service.start(puzzle)
 
-    service.reveal_next_move(session.session_id)
+    reveal_next_move(service, session.session_id)
     first = service.submit_move(session.session_id, "d2d4")
     finished = service.submit_move(session.session_id, "g1f3")
 
