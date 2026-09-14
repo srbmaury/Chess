@@ -65,6 +65,14 @@ def snapshot_from_normalized_cp(value: int, *, ply: int = 30) -> ScoreSnapshot:
     return ScoreSnapshot(cp=value, mate=None, expected_score=_expected_score(score, ply=ply))
 
 
+def _winning_mate(score: ScoreSnapshot) -> bool:
+    return score.mate is not None and score.expected_score >= 0.999
+
+
+def _losing_mate(score: ScoreSnapshot) -> bool:
+    return score.mate is not None and score.expected_score <= 0.001
+
+
 def classify_move_quality(
     *,
     before: ScoreSnapshot,
@@ -80,10 +88,10 @@ def classify_move_quality(
     if delivered_mate:
         return MoveAssessment("best", "delivers checkmate")
 
-    if before.mate is not None and before.mate > 0 and not (after.mate is not None and after.mate >= 0):
+    if _winning_mate(before) and not _winning_mate(after):
         return MoveAssessment("miss", "forced mate was available")
 
-    if after.mate is not None and after.mate < 0 and not (before.mate is not None and before.mate < 0):
+    if _losing_mate(after) and not _losing_mate(before):
         return MoveAssessment("blunder", "allows forced mate")
 
     if before.expected_score >= 0.90 and after.expected_score <= 0.65 and expected_drop >= 0.25:
@@ -177,7 +185,7 @@ def alternatives_show_uniqueness(
         return False
     first = score_snapshot(scores[0], user_color, ply=ply)
     second = score_snapshot(scores[1], user_color, ply=ply)
-    if first.mate is not None and first.mate >= 0 and not (second.mate is not None and second.mate >= 0):
+    if _winning_mate(first) and not _winning_mate(second):
         return True
     expected_gap = first.expected_score - second.expected_score
     if expected_gap >= 0.08:
