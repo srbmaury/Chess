@@ -89,7 +89,7 @@ def _service(tmp_path: Path, engine: ScriptedEngine):
     return service, training, puzzle
 
 
-def test_revealing_next_move_is_idempotent_for_same_position_and_marks_assistance(tmp_path: Path):
+def test_revealing_next_move_is_idempotent_for_same_session_and_marks_assistance(tmp_path: Path):
     start = _position()
     engine = ScriptedEngine({start.fen(): _info(100, "d2d4", "d7d5", "g1f3")})
     service, training, puzzle = _service(tmp_path, engine)
@@ -108,12 +108,7 @@ def test_revealing_next_move_is_idempotent_for_same_position_and_marks_assistanc
     assert second == first
     assert len(engine.calls) == 1
     assert training.review_count("p1") == 0
-
-    steps = AdaptiveSessionStore(training.path).steps(session.session_id)
-    assert len(steps) == 1
-    assert steps[0].source == "hint"
-    assert steps[0].accepted is False
-    assert steps[0].fen_before == START_FEN
+    assert AdaptiveSessionStore(training.path).steps(session.session_id) == []
 
 
 def test_finishing_after_revealing_a_hint_records_an_incorrect_review(tmp_path: Path):
