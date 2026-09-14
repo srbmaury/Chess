@@ -306,7 +306,15 @@ class AdaptivePracticeService:
         user_color = self._user_color(session)
         best_eval_cp = normalize_score(info["score"], user_color)
         best_move = self._first_pv_move(info, board)
-        expected = best_move.uci() if best_move is not None else puzzle.best_move_uci
+        if expected is not None:
+            try:
+                expected_move = chess.Move.from_uci(expected)
+            except ValueError:
+                expected_move = None
+            if expected_move is None or expected_move not in board.legal_moves:
+                expected = None
+        if expected is None:
+            expected = best_move.uci() if best_move is not None else puzzle.best_move_uci
         state.expected_user_uci = expected
         state.expected_best_eval_cp = best_eval_cp
         state.expected_winning_mate = self._winning_mate(info, user_color)
