@@ -63,7 +63,7 @@ test('line so far shows only accepted moves and hides rejected guesses', async (
       { step_index: 0, side: 'user', move_uci: 'c2c4', move_san: 'c4', accepted: false },
       { step_index: 1, side: 'user', move_uci: 'd2d4', move_san: 'd4', accepted: true },
       { step_index: 2, side: 'engine', move_uci: 'd7d5', move_san: 'd5', accepted: true },
-      { step_index: 3, side: 'user', move_uci: 'e2e4', move_san: 'e4', accepted: false },
+      { step_index: 3, side: 'user', move_uci: 'a2a3', move_san: 'a3', accepted: false },
       { step_index: 4, side: 'user', move_uci: 'g1f3', move_san: 'Nf3', accepted: true },
       { step_index: 5, side: 'engine', move_uci: 'g8f6', move_san: 'Nf6', accepted: true },
     ],
@@ -83,7 +83,7 @@ test('line so far shows only accepted moves and hides rejected guesses', async (
   expect(screen.getByText('2. Nf3')).toBeTruthy()
   expect(screen.getByText('… Nf6')).toBeTruthy()
   expect(document.body.textContent).not.toContain('c4')
-  expect(document.body.textContent).not.toContain('e4')
+  expect(document.body.textContent).not.toContain('a3')
 })
 
 test('show next best move reveals one move while keeping the drill active', async () => {
