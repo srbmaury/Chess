@@ -147,7 +147,7 @@ def test_alternate_move_within_30_cp_is_accepted_and_line_branches(tmp_path: Pat
     assert training.review_count("p1") == 0
 
 
-def test_alternate_move_beyond_30_cp_fails_sequence_once(tmp_path: Path):
+def test_alternate_move_beyond_30_cp_keeps_same_position_for_retry(tmp_path: Path):
     start = _position()
     after_c4 = _position("c2c4")
     engine = ScriptedEngine(
@@ -163,13 +163,17 @@ def test_alternate_move_beyond_30_cp_fails_sequence_once(tmp_path: Path):
     repeated = service.submit_move(session.session_id, "c2c4")
 
     assert result.accepted is False
-    assert result.status == "failed"
+    assert result.status == "active"
     assert result.eval_loss_cp == 31
-    assert repeated.status == "failed"
-    assert training.review_count("p1") == 1
+    assert result.current_fen == START_FEN
+    assert result.current_ply == 0
+    assert repeated.status == "active"
+    assert repeated.current_fen == START_FEN
+    assert repeated.user_moves_attempted == 2
+    assert training.review_count("p1") == 0
 
 
-def test_forced_winning_mate_must_be_preserved(tmp_path: Path):
+def test_forced_winning_mate_must_be_preserved_without_ending_retry(tmp_path: Path):
     start = _position()
     after_c4 = _position("c2c4")
     engine = ScriptedEngine(
@@ -184,8 +188,10 @@ def test_forced_winning_mate_must_be_preserved(tmp_path: Path):
     result = service.submit_move(session.session_id, "c2c4")
 
     assert result.accepted is False
-    assert result.status == "failed"
-    assert training.review_count("p1") == 1
+    assert result.status == "active"
+    assert result.current_fen == START_FEN
+    assert result.current_ply == 0
+    assert training.review_count("p1") == 0
 
 
 def test_alternate_move_that_preserves_winning_mate_is_accepted(tmp_path: Path):
@@ -326,4 +332,3 @@ def test_engine_failure_leaves_session_active_and_unpenalized(tmp_path: Path):
     assert current.status == "active"
     assert current.user_moves_attempted == 0
     assert training.review_count("p1") == 0
-
