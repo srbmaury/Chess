@@ -10,7 +10,7 @@ import typer
 from . import services
 from .config import Settings
 from .config import get_settings as _get_root_settings
-from .profiles import ProfileManager
+from .profiles import ProfileManager, canonicalize_username
 
 app = typer.Typer(no_args_is_help=True)
 T = TypeVar("T")
@@ -315,6 +315,34 @@ def progress(
     typer.echo(f"Review accuracy: {_accuracy_text(summary.accuracy)}")
     _print_progress_rows("Top heuristic motifs:", summary.by_motif)
     _print_progress_rows("Top openings:", summary.by_opening)
+
+
+@app.command("delete-user-data")
+def delete_user_data(
+    username: Annotated[str, typer.Option("--username")],
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    model_dir: Annotated[Path | None, typer.Option("--model-dir")] = None,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Delete without the interactive username confirmation."),
+    ] = False,
+) -> None:
+    """Permanently delete all locally stored data for one player."""
+    root = _execute(
+        lambda: _get_root_settings(None, data_dir=data_dir, model_dir=model_dir)
+    )
+    key = _execute(lambda: canonicalize_username(username))
+    if not yes:
+        confirmation = typer.prompt(
+            f"Type '{key}' to permanently delete this player's local data"
+        )
+        if confirmation.strip() != key:
+            typer.echo("Deletion cancelled.")
+            raise typer.Exit(code=1)
+
+    manager = ProfileManager(root)
+    _execute(lambda: manager.delete_profile(key))
+    typer.echo(f"Permanently deleted local data for '{key}'.")
 
 
 @app.command()

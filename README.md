@@ -6,7 +6,7 @@ Chess ML Coach is a local-first chess improvement tool that combines:
 
 - **Stockfish** for objective position evaluation, best moves, principal variations, and centipawn loss;
 - **LightGBM** for learning the kinds of positions in which a specific player is historically most likely to make a significant mistake;
-- a **personal puzzle trainer** generated from that player's own mistakes;
+- a **personal puzzle trainer** with adaptive Stockfish-guided continuations generated from that player's own mistakes;
 - **spaced repetition** and persistent mastery/progress tracking;
 - an interactive **FastAPI + React** web UI;
 - engine-grounded **"Why is this best?"** explanations after a puzzle attempt.
@@ -99,10 +99,10 @@ The web UI contains:
 
 - **Player controls** — enter a Chess.com username, add another player, or switch between local profiles;
 - **Dashboard** — analyzed moves, due/mastered puzzles, review accuracy, and artifact readiness;
-- **Practice** — interactive chessboard puzzles generated from the active player's own mistakes;
+- **Practice** — Adaptive continuation drills by default, with the original one-move trainer available as Quick mode;
 - **Why is this best?** — after an attempt, lazily analyze one position and explain the best move using Stockfish's line plus deterministic board facts;
 - **Mistakes** — browse active mistake/blunder positions and evaluation losses;
-- **Progress** — review activity, mastery, motif accuracy, and opening accuracy;
+- **Progress** — review activity, mastery, motif/opening accuracy, and separate adaptive calculation metrics;
 - **Pipeline** — Sync, Analyze, Features, Puzzles, Train, and Report with live progress.
 
 ### Multiple players
@@ -139,6 +139,27 @@ The active profile is recorded locally in `data/profiles.json`. Usernames are va
 
 A second repository clone is **not required** to test another Chess.com account. Use **Add player** / **Switch player** in the UI, or pass `--username` to CLI commands.
 
+### Permanently delete a player's local data
+
+Stop the web UI and any pipeline work first. Then delete one player's raw games,
+processed datasets, Stockfish cache, puzzle/review/explanation history, trained
+model, and local profile metadata:
+
+```bash
+chess-coach delete-user-data --username alice
+```
+
+The interactive command requires typing the canonical username exactly. For
+non-interactive local scripts, explicitly bypass the prompt:
+
+```bash
+chess-coach delete-user-data --username alice --yes
+```
+
+Deletion is limited to that username's isolated directories. It refuses unknown
+profiles and profiles with an active Stockfish analysis lock. This removes only
+Chess ML Coach's local copies; it does not delete public games from Chess.com.
+
 ### Existing single-user installations
 
 Older versions stored artifacts directly under:
@@ -171,6 +192,30 @@ Player switching is disabled while a pipeline job is running or stopping so a jo
 ## CLI workflow
 
 All CLI pipeline commands are profile-aware. `--data-dir` and `--model-dir` remain *root* directories; username scoping is applied beneath them automatically.
+
+List the installed commands or inspect a command's exact options at any time:
+
+```bash
+chess-coach --help
+chess-coach COMMAND --help
+```
+
+The complete command set is:
+
+| Command | Purpose |
+| --- | --- |
+| `chess-coach sync` | Download and deduplicate Chess.com games. |
+| `chess-coach analyze` | Run resumable full-game Stockfish analysis. |
+| `chess-coach features` | Build the ML-ready feature dataset. |
+| `chess-coach puzzles` | Build or refresh the personal puzzle bank. |
+| `chess-coach train` | Train the personalized LightGBM model. |
+| `chess-coach report` | Generate the coaching report. |
+| `chess-coach practice` | Run the terminal one-move trainer. |
+| `chess-coach progress` | Show review progress and recurring themes. |
+| `chess-coach ui` | Start the local FastAPI + React application. |
+| `chess-coach delete-user-data` | Permanently delete one local player's isolated data. |
+
+There is no separate adaptive CLI command in V1. Adaptive continuation training runs in the web UI; terminal `chess-coach practice` intentionally retains the Quick one-move behavior.
 
 For a particular Chess.com account:
 
@@ -251,7 +296,7 @@ chess-coach puzzles
 
 Puzzle generation reuses existing engine analysis and does not launch Stockfish. Rebuilding is idempotent: attempts, streaks, due dates, mastery, reviews, and cached explanations are preserved. Positions that are no longer eligible are retired from active practice without deleting their history.
 
-Practice due puzzles:
+Practice due puzzles in the terminal's Quick one-move flow:
 
 ```bash
 chess-coach practice --limit 10
@@ -267,13 +312,25 @@ The spaced-repetition schedule is intentionally simple:
 | 3 correct in a row | 14 days |
 | 4+ correct in a row | 30 days |
 
-A puzzle is considered mastered after four consecutive correct reviews. A later failure resets the streak.
+A puzzle is considered mastered after four consecutive correct reviews. A later failure resets the streak. In Adaptive mode, the review is correct only when the whole required continuation is converted; recognizing the first move but missing a later continuation records one incorrect review.
 
 Track progress:
 
 ```bash
 chess-coach progress
 ```
+
+### Adaptive and Quick web practice
+
+The web Practice page opens in **Adaptive** mode. **Quick** preserves the existing one-move flow and records its review immediately after that move.
+
+Adaptive mode evaluates a short continuation locally with Stockfish. The stored principal-variation move is accepted, and ordinary alternatives are also accepted when they lose no more than **30 centipawns**. When a forced win is a mate, an alternative must preserve a winning mate for the training side. A drill stops after conversion, a terminal board state, a quiet stable position, four accepted decisions, or eight plies.
+
+An adaptive session records exactly one spaced-repetition review when it succeeds or fails. Abandoning it—by switching to Quick, skipping, or moving on—records no review. Active sessions are persisted in the current player's `training.db`, so refreshing the browser or restarting the application resumes the current position and already-played line without exposing the next expected move.
+
+Stockfish is started lazily for an active adaptive drill and is closed at completion, abandonment, profile switch, or application shutdown. This per-session engine is independent of the full-game analyzer's single-writer lock and does not mutate `analysis.parquet`.
+
+The Progress page keeps overall review accuracy unchanged and reports adaptive drills completed, conversion rate, continuation accuracy excluding each drill's first move, average accepted decisions, and average calculation depth separately.
 
 ## Why is this best?
 
@@ -379,7 +436,6 @@ Tests mock network and engine boundaries, so CI does not need a Chess.com accoun
 
 High-value follow-ups include:
 
-- multi-ply puzzle continuations instead of validating only the first best move;
 - stronger tactical-motif classification;
 - rolling 7/30/90-day improvement tracking;
 - SHAP explanations for the personalized LightGBM risk model;

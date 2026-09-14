@@ -186,3 +186,4 @@ class DashboardResponse(BaseModel):
     analyzed_moves: int
     training: TrainingSummary
     artifacts: dict[str, ArtifactState]
+

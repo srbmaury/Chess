@@ -624,3 +624,4 @@ class AdaptiveSessionStore:
                 sum(int(row["current_ply"]) for row in completed) / count
             ),
         )
+

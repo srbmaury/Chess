@@ -350,3 +350,4 @@ The deduplicated workflow must create one PR run containing the `python` and `we
 - [ ] **Step 5: Mark ready and merge only when exact-head CI is green**
 
 Use squash merge unless repository state requires otherwise. Report the merge SHA and final Python/frontend test counts.
+

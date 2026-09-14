@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Settings
+from .locking import exclusive_profile_lock
 
 _USERNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
 _REGISTRY_VERSION = 1
@@ -55,6 +56,7 @@ class ProfileManager:
             username=key,
             data_dir=self.root_settings.data_dir / "users" / key,
             model_dir=self.root_settings.model_dir / "users" / key,
+            profile_lock_path=self.root_settings.data_dir / ".profile-locks" / f"{key}.lock",
         )
 
     def _empty_registry(self) -> dict[str, object]:
@@ -170,6 +172,75 @@ class ProfileManager:
         registry["active_username"] = key
         self._save_registry(registry)
         return self._record_from_payload(key, payload)
+
+    def _assert_storage_paths_are_not_symlinked(self, *paths: Path) -> None:
+        for path in paths:
+            absolute = path.absolute()
+            for candidate in (absolute, *absolute.parents):
+                if candidate.is_symlink():
+                    raise RuntimeError(
+                        f"Refusing deletion through symlinked storage path: {candidate}"
+                    )
+
+    def delete_profile(self, username: str) -> None:
+        """Permanently remove one local player's artifacts and registry metadata."""
+        key = canonicalize_username(username)
+        scoped = self.settings_for(key)
+        if scoped.profile_lock_path is None:
+            raise RuntimeError(f"Missing profile lock path for '{key}'")
+
+        self._assert_storage_paths_are_not_symlinked(
+            self.root_settings.data_dir,
+            self.root_settings.model_dir,
+            scoped.data_dir.parent,
+            scoped.model_dir.parent,
+            scoped.profile_lock_path.parent,
+        )
+        registry = self._load_registry()
+        profiles = dict(registry.get("profiles", {}))
+        profile_paths = (scoped.data_dir, scoped.model_dir)
+        marker_owner = None
+
+        if self.migration_marker.exists():
+            try:
+                marker = json.loads(self.migration_marker.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"Cannot read profile migration marker: {self.migration_marker}"
+                ) from exc
+            if isinstance(marker, dict) and marker.get("owner_username"):
+                marker_owner = canonicalize_username(str(marker["owner_username"]))
+
+        known = key in profiles or any(
+            path.exists() or path.is_symlink() for path in profile_paths
+        )
+        if not known:
+            raise KeyError(f"Unknown player profile: {username}")
+
+        def busy_message(lock_path: Path) -> str:
+            return (
+                f"Cannot delete '{key}' while analysis is running or another profile "
+                f"operation holds {lock_path}. Stop it first."
+            )
+
+        with exclusive_profile_lock(
+            scoped.profile_lock_path,
+            error_message=busy_message,
+        ):
+            for path in profile_paths:
+                if path.is_symlink():
+                    path.unlink()
+                elif path.exists():
+                    shutil.rmtree(path)
+
+            profiles.pop(key, None)
+            registry["profiles"] = profiles
+            if registry.get("active_username") == key:
+                registry["active_username"] = None
+            self._save_registry(registry)
+
+            if marker_owner == key:
+                self.migration_marker.unlink(missing_ok=True)
 
     def _legacy_files(self, scoped: Settings) -> list[tuple[Path, Path]]:
         pairs: list[tuple[Path, Path]] = []

@@ -200,3 +200,4 @@ def abandon_adaptive(request: Request, session_id: str) -> AdaptiveStartResponse
         _raise_domain_error(exc)
         raise AssertionError("unreachable") from exc
     return _start_payload(state)
+

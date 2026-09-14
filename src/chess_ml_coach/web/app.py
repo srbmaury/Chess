@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,8 @@ from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
 from ..services import training_db_path
 from ..training import TrainingStore
-from .adaptive_routes import AdaptiveServiceRegistry, router as adaptive_router
+from .adaptive_routes import AdaptiveServiceRegistry
+from .adaptive_routes import router as adaptive_router
 from .explanation_routes import router as explanation_router
 from .pipeline import (
     TERMINAL_STATUSES,
@@ -123,11 +125,18 @@ def create_app(
     initial = settings or Settings()
     manager = pipeline_manager or PipelineManager(initial)
     adaptive = adaptive_services or AdaptiveServiceRegistry()
-    app = FastAPI(title="Chess ML Coach", version=APP_VERSION)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            adaptive.close_all()
+
+    app = FastAPI(title="Chess ML Coach", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = initial
     app.state.pipeline_manager = manager
     app.state.adaptive_services = adaptive
-    app.add_event_handler("shutdown", adaptive.close_all)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],

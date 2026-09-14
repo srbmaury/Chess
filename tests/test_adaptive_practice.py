@@ -326,3 +326,4 @@ def test_engine_failure_leaves_session_active_and_unpenalized(tmp_path: Path):
     assert current.status == "active"
     assert current.user_moves_attempted == 0
     assert training.review_count("p1") == 0
+

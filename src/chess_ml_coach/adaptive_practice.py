@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import chess
 import chess.engine
@@ -127,10 +128,8 @@ class AdaptivePracticeService:
             return state
 
     def _replace_adapter(self, session_id: str, state: _EngineState) -> None:
-        try:
+        with suppress(chess.engine.EngineTerminatedError, BrokenPipeError, OSError):
             state.adapter.close()
-        except Exception:
-            pass
         state.adapter = self._new_adapter()
 
     def _analyse(
@@ -374,7 +373,6 @@ class AdaptivePracticeService:
                 best_eval_cp=best_eval_cp,
                 eval_loss_cp=loss_cp,
             )
-            attempted = session.user_moves_attempted + 1
             accepted_count = session.user_moves_accepted + int(accepted)
             ply_after_user = session.current_ply + 1
 
@@ -589,10 +587,8 @@ class AdaptivePracticeService:
             state = self._engines.pop(session_id, None)
             self._locks.pop(session_id, None)
         if state is not None:
-            try:
+            with suppress(chess.engine.EngineTerminatedError, BrokenPipeError, OSError):
                 state.adapter.close()
-            except Exception:
-                pass
 
     def close(self) -> None:
         with self._guard:

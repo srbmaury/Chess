@@ -264,3 +264,4 @@ def test_metrics_exclude_first_user_move_from_continuation_accuracy(tmp_path: Pa
     assert metrics.continuation_accuracy == 0.5
     assert metrics.average_accepted_decisions == 1.5
     assert metrics.average_calculation_depth_plies == 3.0
+

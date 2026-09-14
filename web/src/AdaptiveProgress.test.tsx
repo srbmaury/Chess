@@ -59,3 +59,4 @@ test('Progress renders adaptive continuation metrics separately from review accu
   expect(screen.getByText('4.3 plies')).toBeTruthy()
   expect(screen.getByText('50.0%')).toBeTruthy()
 })
+

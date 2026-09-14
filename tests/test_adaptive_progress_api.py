@@ -131,3 +131,4 @@ def test_progress_includes_adaptive_metrics_without_changing_review_accuracy(tmp
         "average_accepted_decisions": 1.5,
         "average_calculation_depth_plies": 3.0,
     }
+

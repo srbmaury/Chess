@@ -126,3 +126,4 @@ def enable_profiles(
         _activate(app, active)
     app.include_router(router)
     return profiles
+

@@ -96,6 +96,28 @@ test('reveals why the best move is best only after a practice attempt', async ()
         }),
       } as Response
     }
+    if (url.endsWith('/adaptive/start')) {
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: 's1',
+          puzzle_id: 'p1',
+          status: 'active',
+          current_fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+          orientation: 'white',
+          user_moves_attempted: 0,
+          user_moves_accepted: 0,
+          current_ply: 0,
+          max_eval_loss_cp: 0,
+          max_user_decisions: 4,
+          steps: [],
+          review: null,
+        }),
+      } as Response
+    }
+    if (url.endsWith('/adaptive/s1/abandon')) {
+      return { ok: true, json: async () => ({ status: 'abandoned' }) } as Response
+    }
     if (url.includes('/attempt')) {
       return {
         ok: true,
@@ -132,6 +154,10 @@ test('reveals why the best move is best only after a practice attempt', async ()
 
   expect(await screen.findByText('White to move')).toBeTruthy()
   expect(screen.queryByText('Why is this best?')).toBeNull()
+
+  // The explanation regression exercises the legacy one-move flow, now exposed as Quick.
+  fireEvent.click(screen.getByRole('button', { name: 'Quick' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Quick' }).getAttribute('aria-pressed')).toBe('true'))
 
   fireEvent.click(screen.getByRole('button', { name: 'Play test move' }))
 
