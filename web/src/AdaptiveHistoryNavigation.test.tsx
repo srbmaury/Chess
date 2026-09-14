@@ -110,7 +110,7 @@ test('adaptive history navigates backward and forward one ply at a time', async 
   expect(screen.queryByText('Reviewing earlier position')).toBeNull()
 })
 
-test('clicking a played move jumps to that ply and return to current restores live play', async () => {
+test('clicking a played move stays read-only until next reaches the live position', async () => {
   const fetchMock = renderActiveSession()
   await screen.findByText('Line so far')
 
@@ -121,11 +121,16 @@ test('clicking a played move jumps to that ply and return to current restores li
   expect(screen.getByRole('button', { name: 'Show next best move' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: 'Skip' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: '… d5' }).getAttribute('aria-current')).toBe('step')
+  expect(screen.queryByRole('button', { name: 'Return to current' })).toBeNull()
 
   fireEvent.click(screen.getByRole('button', { name: 'Try board move' }))
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
-  fireEvent.click(screen.getByRole('button', { name: 'Return to current' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Next position' }))
+  expect(screen.getByTestId('board-position').textContent).toBe(fenAfter('d2d4', 'd7d5', 'g1f3'))
+  expect(screen.getByTestId('board-dragging').textContent).toBe('false')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Next position' }))
   expect(screen.getByTestId('board-position').textContent).toBe(activeSession.current_fen)
   expect(screen.getByTestId('board-dragging').textContent).toBe('true')
   expect(screen.getByRole('button', { name: 'Show next best move' }).hasAttribute('disabled')).toBe(false)
