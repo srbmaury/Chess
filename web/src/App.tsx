@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import CommunityControls from './CommunityControls'
-import LegacyApp from './LegacyApp'
+import CoachApp from './LegacyApp'
 
 export default function App() {
   const [profileRevision, setProfileRevision] = useState(0)
@@ -12,6 +12,6 @@ export default function App() {
       onProfileChanged={() => setProfileRevision((value) => value + 1)}
       onActiveProfileChanged={setActiveProfile}
     />
-    {activeProfile ? <LegacyApp key={`${activeProfile}-${profileRevision}`} /> : null}
+    {activeProfile ? <CoachApp key={`${activeProfile}-${profileRevision}`} /> : null}
   </>
 }

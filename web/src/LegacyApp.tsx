@@ -133,7 +133,7 @@ function ProgressPage() {
   useEffect(() => { api.progress().then(setProgress).catch((x: Error) => setError(x.message)) }, [])
   if (error) return <ErrorBox message={error} />
   if (!progress) return <p className="muted">Loading progress…</p>
-  return <section><Heading kicker="TRAINING" title="Progress" copy="Measure puzzle mastery and practice consistency." /><div className="metrics"><Metric label="Reviewed" value={progress.reviewed_puzzles} /><Metric label="Mastered" value={progress.mastered_puzzles} /><Metric label="Total reviews" value={progress.total_reviews} /><Metric label="Accuracy" value={percentage(progress.accuracy)} /></div><div className="panel"><h2>Review activity</h2><ResponsiveContainer width="100%" height={250}><LineChart data={progress.daily_reviews}><XAxis dataKey="date" /><YAxis allowDecimals={false} /><Tooltip /><Line type="monotone" dataKey="reviews" stroke="currentColor" strokeWidth={2} /></LineChart></ResponsiveContainer></div><div className="columns"><Ranking title="By motif" rows={progress.by_motif} /><Ranking title="By opening" rows={progress.by_opening} /></div></section>
+  return <section><Heading kicker="TRAINING" title="Progress" copy="Measure puzzle mastery and practice consistency." /><div className="metrics"><Metric label="Reviewed" value={progress.reviewed_puzzles} /><Metric label="Mastered" value={progress.mastered_puzzles} /><Metric label="Total reviews" value={progress.total_reviews} /><Metric label="Accuracy" value={percentage(progress.accuracy)} /></div><div className="panel"><h2>Review activity</h2><ResponsiveContainer width="100%" height={250}><LineChart data={progress.daily_reviews}><XAxis dataKey="date" tick={{ fill: 'var(--muted)' }} axisLine={{ stroke: 'var(--line)' }} tickLine={{ stroke: 'var(--line)' }} /><YAxis allowDecimals={false} tick={{ fill: 'var(--muted)' }} axisLine={{ stroke: 'var(--line)' }} tickLine={{ stroke: 'var(--line)' }} /><Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} itemStyle={{ color: 'var(--text)' }} /><Line type="monotone" dataKey="reviews" stroke="var(--accent)" strokeWidth={2} /></LineChart></ResponsiveContainer></div><div className="columns"><Ranking title="By motif" rows={progress.by_motif} /><Ranking title="By opening" rows={progress.by_opening} /></div></section>
 }
 function Ranking({ title, rows }: { title: string; rows: GroupRow[] }) { return <div className="panel"><h2>{title}</h2>{rows.slice(0, 8).map((row) => <div className="rank" key={row.label}><span>{row.label}</span><b>{percentage(row.accuracy)}</b></div>)}</div> }
 
@@ -141,6 +141,7 @@ function PipelinePage() {
   const [status, setStatus] = useState<Record<string, any> | null>(null)
   const [depth, setDepth] = useState(14)
   const [error, setError] = useState('')
+  const [streamGeneration, setStreamGeneration] = useState(0)
   const refresh = useCallback(() => api.pipelineStatus().then(setStatus).catch((x: Error) => setError(x.message)), [])
   useEffect(() => {
     refresh()
@@ -148,14 +149,18 @@ function PipelinePage() {
     stream.onmessage = (event) => {
       const progress = JSON.parse(event.data)
       setStatus((old) => ({ ...old, ...progress, progress }))
+      if (['succeeded', 'failed', 'cancelled'].includes(progress.status)) {
+        stream.close()
+      }
     }
     return () => stream.close()
-  }, [refresh])
+  }, [refresh, streamGeneration])
 
   async function start(stage: string) {
     try {
       setError('')
       setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined))
+      setStreamGeneration((value) => value + 1)
       window.setTimeout(refresh, 250)
     } catch (x) {
       setError((x as Error).message)

@@ -38,6 +38,25 @@ def run_analyze(settings: Settings, progress: ProgressCallback | None = None) ->
     return {"rows": len(analysis), "output": output}
 
 
+def _ensure_analysis_complete(moves, analysis) -> None:
+    user_moves = moves[moves["is_user_move"].fillna(False).astype(bool)]
+    expected = {
+        (str(row.game_id), int(row.ply))
+        for row in user_moves[["game_id", "ply"]].itertuples(index=False)
+    }
+    analyzed = {
+        (str(row.game_id), int(row.ply))
+        for row in analysis[["game_id", "ply"]].itertuples(index=False)
+    }
+    missing = expected - analyzed
+    if missing:
+        completed = len(expected) - len(missing)
+        raise RuntimeError(
+            f"Analysis is incomplete: {completed}/{len(expected)} user moves analyzed. "
+            "Please resume `chess-coach analyze` before building features."
+        )
+
+
 def run_features(settings: Settings) -> dict:
     import pandas as pd
 
@@ -52,6 +71,7 @@ def run_features(settings: Settings) -> dict:
             raise FileNotFoundError(f"Missing prerequisite {path}")
     games, moves = read_normalized(settings.data_dir / "processed")
     analysis = pd.read_parquet(analysis_path)
+    _ensure_analysis_complete(moves, analysis)
     frame = build_feature_dataset(games, moves, analysis, settings.thresholds)
     output = settings.data_dir / "processed" / "features.parquet"
     write_feature_dataset(frame, output)

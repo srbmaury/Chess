@@ -1,7 +1,15 @@
 from pathlib import Path
 
+import pandas as pd
+import pytest
+
 from chess_ml_coach.config import Settings
-from chess_ml_coach.services import answer_to_uci, run_puzzles, training_db_path
+from chess_ml_coach.services import (
+    answer_to_uci,
+    run_features,
+    run_puzzles,
+    training_db_path,
+)
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -30,3 +38,38 @@ def test_run_puzzles_requires_feature_dataset(tmp_path: Path):
 
     assert "features.parquet" in message
     assert "chess-coach features" in message
+
+
+def test_run_features_rejects_partial_analysis_after_stopped_analyze(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
+    processed = settings.data_dir / "processed"
+    engine = settings.data_dir / "engine"
+    processed.mkdir(parents=True)
+    engine.mkdir(parents=True)
+    (processed / "games.parquet").touch()
+    (processed / "moves.parquet").touch()
+    (engine / "analysis.parquet").touch()
+
+    moves = pd.DataFrame(
+        [
+            {"game_id": "g1", "ply": 1, "is_user_move": True},
+            {"game_id": "g1", "ply": 2, "is_user_move": True},
+            {"game_id": "g1", "ply": 3, "is_user_move": False},
+        ]
+    )
+    analysis = pd.DataFrame([{"game_id": "g1", "ply": 1}])
+
+    monkeypatch.setattr(
+        "chess_ml_coach.pgn.read_normalized",
+        lambda _processed: (pd.DataFrame(), moves),
+    )
+    monkeypatch.setattr(pd, "read_parquet", lambda _path: analysis)
+
+    with pytest.raises(RuntimeError, match="Analysis is incomplete") as exc_info:
+        run_features(settings)
+
+    assert "1/2 user moves analyzed" in str(exc_info.value)
+    assert "resume `chess-coach analyze`" in str(exc_info.value).lower()

@@ -25,7 +25,7 @@ class UnknownPipelineStageError(ValueError):
 
 
 class PipelineCancelled(RuntimeError):
-    """Internal cooperative-cancellation signal raised at a progress boundary."""
+    """Internal cooperative-cancellation signal."""
 
 
 @dataclass(frozen=True)
@@ -119,8 +119,7 @@ class PipelineManager:
             return self.stop()
         if stage not in PIPELINE_STAGES or stage not in self._runners:
             raise UnknownPipelineStageError(f"Unknown pipeline stage: {stage}")
-        resolved_options = options or {}
-        run_settings = self._settings_for(settings or self.settings, stage, resolved_options)
+        run_settings = self._settings_for(settings or self.settings, stage, options or {})
         with self._lock:
             if self._snapshot.status in {"running", "stopping"}:
                 raise PipelineBusyError(
@@ -142,7 +141,7 @@ class PipelineManager:
                     "started_at": started_at.isoformat(),
                 }
             )
-            self._executor.submit(self._run, stage, run_settings)
+            self._executor.submit(self._run, stage, run_settings, started_at)
             return self._snapshot
 
     def stop(self) -> PipelineJobSnapshot:
@@ -157,14 +156,19 @@ class PipelineManager:
             self._snapshot = replace(self._snapshot, status="stopping")
             self._record_event(
                 {
-                    "stage": self._snapshot.stage or "analyze",
+                    "stage": "analyze",
                     "status": "stopping",
                     "username": self._snapshot.username or "",
                 }
             )
             return self._snapshot
 
-    def _finish_cancelled(self, stage: str, started_at: datetime | None, username: str) -> None:
+    def _finish_cancelled(
+        self,
+        stage: str,
+        started_at: datetime | None,
+        username: str,
+    ) -> None:
         finished_at = datetime.now(UTC)
         with self._lock:
             self._snapshot = PipelineJobSnapshot(
@@ -184,21 +188,20 @@ class PipelineManager:
             )
             self._cancel_requested = False
 
-    def _run(self, stage: str, run_settings: Settings) -> None:
+    def _run(self, stage: str, run_settings: Settings, started_at: datetime) -> None:
         runner = self._runners[stage]
-        started_at = self.snapshot().started_at
 
         def progress(payload: dict[str, object]) -> None:
             with self._lock:
                 cancel_requested = self._cancel_requested
-            self._record_event(
-                {
-                    "stage": stage,
-                    "status": "stopping" if cancel_requested else "running",
-                    "username": run_settings.username,
-                    **payload,
-                }
-            )
+                self._record_event(
+                    {
+                        "stage": stage,
+                        "status": "stopping" if cancel_requested else "running",
+                        "username": run_settings.username,
+                        **payload,
+                    }
+                )
             if cancel_requested:
                 raise PipelineCancelled("Pipeline cancellation requested")
 
@@ -231,8 +234,8 @@ class PipelineManager:
             return
 
         with self._lock:
-            cancel_requested = self._cancel_requested
-        if cancel_requested:
+            cancelled_after_runner = self._cancel_requested
+        if cancelled_after_runner:
             self._finish_cancelled(stage, started_at, run_settings.username)
             return
 

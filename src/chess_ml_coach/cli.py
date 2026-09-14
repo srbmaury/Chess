@@ -27,10 +27,8 @@ _training_db_path = services.training_db_path
 _answer_to_uci = services.answer_to_uci
 
 
-def _resolve_profile_settings(
-    username: str | None,
-    **kwargs,
-) -> Settings:
+def _resolve_profile_settings(username: str | None, **kwargs) -> Settings:
+    """Resolve CLI commands into an isolated per-player workspace."""
     root = _get_root_settings(None, **kwargs)
     manager = ProfileManager(root)
     manager.migrate_legacy(root.username)
@@ -39,8 +37,6 @@ def _resolve_profile_settings(
     return manager.settings_for(selected)
 
 
-# Existing command implementations keep using one resolver name while the root/scoped
-# distinction stays centralized here.
 get_settings = _resolve_profile_settings
 
 
@@ -338,14 +334,12 @@ def ui(
 
     from .web.serve import create_served_app
 
-    # The browser needs root storage so a fresh community install can ask for a
-    # player before creating any profile. An explicit --username selects the
-    # initial player but does not change who owns any legacy workspace.
-    settings = _execute(
+    # UI starts from root storage so a fresh community clone can choose a player.
+    root = _execute(
         lambda: _get_root_settings(None, data_dir=data_dir, model_dir=model_dir)
     )
     web_app = _execute(
-        lambda: create_served_app(settings, initial_username=username)
+        lambda: create_served_app(root, initial_username=username)
     )
     url = f"http://{host}:{port}"
     typer.echo(f"Chess ML Coach UI -> {url}")

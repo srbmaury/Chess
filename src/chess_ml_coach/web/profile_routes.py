@@ -11,6 +11,7 @@ router = APIRouter()
 
 
 def _root_settings(settings: Settings) -> Settings:
+    """Return unscoped storage roots even when handed a player-scoped Settings."""
     key = canonicalize_username(settings.username)
     data_root = settings.data_dir
     model_root = settings.model_dir
@@ -21,17 +22,14 @@ def _root_settings(settings: Settings) -> Settings:
     return replace(settings, data_dir=data_root, model_dir=model_root)
 
 
-def _apply_active_settings(app: FastAPI, username: str) -> Settings:
+def _activate(app: FastAPI, username: str) -> Settings:
     manager: ProfileManager = app.state.profile_manager
     scoped = manager.settings_for(username)
-    current: Settings = app.state.settings
-    object.__setattr__(current, "username", scoped.username)
-    object.__setattr__(current, "data_dir", scoped.data_dir)
-    object.__setattr__(current, "model_dir", scoped.model_dir)
-    return current
+    app.state.settings = scoped
+    return scoped
 
 
-def _profiles_payload(manager: ProfileManager) -> dict[str, object]:
+def _payload(manager: ProfileManager) -> dict[str, object]:
     return {
         "active_username": manager.active_username(),
         "profiles": [
@@ -54,7 +52,7 @@ def _ensure_switch_allowed(request: Request) -> None:
 
 @router.get("/api/profiles")
 def list_profiles(request: Request) -> dict[str, object]:
-    return _profiles_payload(request.app.state.profile_manager)
+    return _payload(request.app.state.profile_manager)
 
 
 @router.post("/api/profiles", status_code=201)
@@ -69,7 +67,7 @@ def create_profile(request: Request, payload: dict[str, object]) -> dict[str, ob
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if activate:
-        _apply_active_settings(request.app, record.username)
+        _activate(request.app, record.username)
     return {
         "username": record.username,
         "display_username": record.display_username,
@@ -87,8 +85,8 @@ def activate_profile(request: Request, username: str) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    _apply_active_settings(request.app, record.username)
-    return _profiles_payload(manager)
+    _activate(request.app, record.username)
+    return _payload(manager)
 
 
 def enable_profiles(
@@ -100,24 +98,28 @@ def enable_profiles(
 ) -> ProfileManager:
     roots = _root_settings(settings)
     profiles = manager or ProfileManager(roots)
-    if manager is not None:
-        # The app's Settings object is mutated when players switch. Keep the
-        # profile manager anchored to an independent root Settings snapshot.
-        profiles.root_settings = roots
-        profiles.registry_path = roots.data_dir / "profiles.json"
-        profiles.migration_marker = roots.data_dir / ".profiles-migrated.json"
+    profiles.root_settings = roots
+    profiles.registry_path = roots.data_dir / "profiles.json"
+    profiles.migration_marker = roots.data_dir / ".profiles-migrated.json"
 
-    # Legacy data belongs to the configured/default owner and migration activates
-    # that profile. A truly fresh install has no legacy data and therefore remains
-    # unselected until the person enters a Chess.com username in the web UI.
+    # Legacy global artifacts always belong to the configured/default owner.
     profiles.migrate_legacy(roots.username)
+
     if initial_username is not None:
         profiles.create_or_activate(initial_username, activate=True)
 
+    # Recover an already-migrated workspace even if profiles.json was lost or the
+    # code was temporarily rolled back. A truly fresh clone still has no active user.
+    if profiles.active_username() is None:
+        default_key = canonicalize_username(roots.username)
+        scoped = profiles.settings_for(default_key)
+        if scoped.data_dir.exists() or scoped.model_dir.exists():
+            profiles.create_or_activate(default_key, activate=True)
+
     app.state.root_settings = roots
     app.state.profile_manager = profiles
-    active_username = profiles.active_username()
-    if active_username is not None:
-        _apply_active_settings(app, active_username)
+    active = profiles.active_username()
+    if active is not None:
+        _activate(app, active)
     app.include_router(router)
     return profiles
