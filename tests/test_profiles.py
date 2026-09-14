@@ -111,3 +111,70 @@ def test_legacy_migration_refuses_conflicting_destination(tmp_path: Path):
 
     assert legacy_db.read_bytes() == b"legacy"
     assert scoped_db.read_bytes() == b"different"
+
+
+def test_delete_profile_removes_only_selected_users_artifacts_and_metadata(tmp_path: Path):
+    root = _root(tmp_path)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    manager.create_or_activate("Bob", activate=False)
+
+    alice = manager.settings_for("alice")
+    bob = manager.settings_for("bob")
+    alice_file = alice.data_dir / "training" / "training.db"
+    alice_model = alice.model_dir / "mistake_model.joblib"
+    bob_file = bob.data_dir / "training" / "training.db"
+    bob_model = bob.model_dir / "mistake_model.joblib"
+    for path in (alice_file, alice_model, bob_file, bob_model):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(path.name, encoding="utf-8")
+
+    manager.migration_marker.write_text(
+        '{"owner_username": "alice", "version": 1}',
+        encoding="utf-8",
+    )
+
+    manager.delete_profile("ALICE")
+
+    assert not alice.data_dir.exists()
+    assert not alice.model_dir.exists()
+    assert bob_file.exists()
+    assert bob_model.exists()
+    assert manager.active_username() is None
+    assert [profile.username for profile in manager.list_profiles()] == ["bob"]
+    assert not manager.migration_marker.exists()
+
+
+def test_delete_profile_rejects_unknown_username_without_removing_other_profiles(tmp_path: Path):
+    root = _root(tmp_path)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Bob")
+    bob = manager.settings_for("bob")
+    artifact = bob.data_dir / "raw" / "games.pgn"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("game", encoding="utf-8")
+
+    with pytest.raises(KeyError, match="Unknown player profile"):
+        manager.delete_profile("alice")
+
+    assert artifact.exists()
+    assert manager.active_username() == "bob"
+
+
+def test_delete_profile_unlinks_profile_symlink_without_following_it(tmp_path: Path):
+    root = _root(tmp_path)
+    manager = ProfileManager(root)
+    manager.create_or_activate("Alice")
+    alice = manager.settings_for("alice")
+    alice.data_dir.rmdir()
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "keep.txt"
+    secret.write_text("keep", encoding="utf-8")
+    alice.data_dir.symlink_to(outside, target_is_directory=True)
+
+    manager.delete_profile("alice")
+
+    assert not alice.data_dir.exists()
+    assert secret.read_text(encoding="utf-8") == "keep"
