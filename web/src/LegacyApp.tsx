@@ -44,6 +44,17 @@ type AdaptiveMoveResult = {
   max_eval_loss_cp: number
   review: AdaptiveReview | null
 }
+type AdaptiveHint = {
+  session_id: string
+  puzzle_id: string
+  status: string
+  move_uci: string
+  move_san: string
+  current_fen: string
+  user_moves_attempted: number
+  user_moves_accepted: number
+  current_ply: number
+}
 type AdaptiveProgress = {
   sessions_completed: number
   success_rate: number | null
@@ -77,6 +88,7 @@ const api = {
   skip: (id: string) => request<{ skipped: boolean }>(`/api/practice/${id}/skip`, { method: 'POST' }),
   adaptiveStart: (id: string) => request<AdaptiveSession>(`/api/practice/${id}/adaptive/start`, { method: 'POST' }),
   adaptiveMove: (sessionId: string, move_uci: string) => request<AdaptiveMoveResult>(`/api/practice/adaptive/${sessionId}/move`, { method: 'POST', body: JSON.stringify({ move_uci }) }),
+  adaptiveHint: (sessionId: string) => request<AdaptiveHint>(`/api/practice/adaptive/${sessionId}/hint`, { method: 'POST' }),
   adaptiveAbandon: (sessionId: string) => request<AdaptiveSession>(`/api/practice/adaptive/${sessionId}/abandon`, { method: 'POST' }),
   progress: () => request<Progress>('/api/progress'),
   puzzles: (query = '') => request<{ items: PuzzleItem[]; total: number; limit: number; offset: number }>(`/api/puzzles${query}`),
@@ -113,6 +125,8 @@ function PracticePage() {
   const [feedback, setFeedback] = useState<Attempt | null>(null)
   const [adaptive, setAdaptive] = useState<AdaptiveSession | null>(null)
   const [lastAdaptiveMove, setLastAdaptiveMove] = useState<AdaptiveMoveResult | null>(null)
+  const [adaptiveHint, setAdaptiveHint] = useState<AdaptiveHint | null>(null)
+  const [hinting, setHinting] = useState(false)
   const [explanation, setExplanation] = useState<Explanation | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [explanationError, setExplanationError] = useState('')
@@ -125,6 +139,8 @@ function PracticePage() {
     setFeedback(null)
     setAdaptive(null)
     setLastAdaptiveMove(null)
+    setAdaptiveHint(null)
+    setHinting(false)
     setExplanation(null)
     setExplaining(false)
     setExplanationError('')
@@ -163,6 +179,9 @@ function PracticePage() {
         }
         const result = await api.adaptiveMove(session.session_id, moveUci)
         setLastAdaptiveMove(result)
+        if (adaptiveHint && result.current_fen !== adaptiveHint.current_fen) {
+          setAdaptiveHint(null)
+        }
         setAdaptive((previous) => ({
           session_id: result.session_id,
           puzzle_id: result.puzzle_id,
@@ -209,6 +228,8 @@ function PracticePage() {
       setMode(next)
       setFeedback(null)
       setLastAdaptiveMove(null)
+      setAdaptiveHint(null)
+      setHinting(false)
       setExplanation(null)
       setExplanationError('')
       if (next === 'adaptive' && puzzle) {
@@ -237,6 +258,29 @@ function PracticePage() {
     return true
   }
 
+  async function showNextBestMove() {
+    if (!adaptive || adaptive.status !== 'active' || submitting || hinting) return
+    if (adaptiveHint?.current_fen === adaptive.current_fen) return
+    setHinting(true)
+    setError('')
+    try {
+      const hint = await api.adaptiveHint(adaptive.session_id)
+      setAdaptiveHint(hint)
+      setAdaptive((previous) => previous ? {
+        ...previous,
+        status: hint.status,
+        current_fen: hint.current_fen,
+        user_moves_attempted: hint.user_moves_attempted,
+        user_moves_accepted: hint.user_moves_accepted,
+        current_ply: hint.current_ply,
+      } : previous)
+    } catch (x) {
+      setError((x as Error).message)
+    } finally {
+      setHinting(false)
+    }
+  }
+
   async function skip() {
     if (!puzzle || submitting) return
     try {
@@ -261,6 +305,7 @@ function PracticePage() {
   const boardEnabled = !submitting && !finished && (mode === 'quick' || adaptiveActive)
   const maxDecisions = adaptive?.max_user_decisions ?? 4
   const outcomeClass = adaptive?.status === 'failed' ? 'feedback bad' : 'feedback good'
+  const hintShown = adaptiveHint?.current_fen === adaptive?.current_fen
 
   return <section>
     <Heading kicker={`${puzzle.phase} · ${puzzle.motif}`} title={`${puzzle.orientation === 'white' ? 'White' : 'Black'} to move`} copy={`${puzzle.game} · ${puzzle.move}`} action={<span className="pill">Difficulty {puzzle.difficulty}/5</span>} />
@@ -274,9 +319,9 @@ function PracticePage() {
       <div className="board"><Chessboard options={{ position: boardFen ?? puzzle.fen, boardOrientation: puzzle.orientation === 'black' ? 'black' : 'white', allowDragging: boardEnabled, onPieceDrop: ({ sourceSquare, targetSquare }) => onDrop(sourceSquare, targetSquare) }} /></div>
       <div className="panel practice-info">
         <h2>{puzzle.opening} <small>({puzzle.eco})</small></h2>
-        {mode === 'adaptive' && adaptive?.steps.length ? <AdaptiveLine steps={adaptive.steps} /> : null}
+        {mode === 'adaptive' && adaptive?.steps.some((step) => step.accepted) ? <AdaptiveLine steps={adaptive.steps} /> : null}
         {mode === 'quick' ? (!feedback ? <><p className="muted">{submitting ? 'Checking your move…' : 'Find the strongest move. The engine answer stays hidden until you commit.'}</p><button className="ghost" disabled={submitting} onClick={() => { void skip() }}>Skip</button></> : <div className={feedback.correct ? 'feedback good' : 'feedback bad'}><h3>{feedback.correct ? 'Correct' : 'Not quite'}</h3><p>Best move: <strong>{feedback.best_move_san}</strong></p>{!feedback.correct && <p>Your game move: <strong>{feedback.your_game_move}</strong></p>}<p>Evaluation loss: {feedback.evaluation_loss_pawns.toFixed(2)} pawns</p><p>Next review: +{feedback.next_interval_days} days</p>{feedback.source_url && <a href={feedback.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>) : (
-          !adaptive ? <p className="muted">Starting adaptive drill…</p> : adaptiveActive ? <div className="adaptive-live"><p className="muted">{submitting ? 'Checking the continuation…' : lastAdaptiveMove?.accepted ? 'Strong. Continuing the line…' : 'Find the strongest move. Strong alternatives are accepted.'}</p>{lastAdaptiveMove?.engine_reply_san && <p>Engine replied <strong>{lastAdaptiveMove.engine_reply_san}</strong></p>}<p className="sequence-progress">{adaptive.user_moves_accepted} / up to {maxDecisions} decisions</p><button className="ghost" disabled={submitting} onClick={() => { void skip() }}>Skip</button></div> : <div className={outcomeClass}><h3>{adaptive.status === 'succeeded' ? 'Converted' : adaptive.status === 'failed' ? 'Continuation missed' : 'Drill ended'}</h3><p>{adaptive.user_moves_accepted}/{adaptive.user_moves_attempted} strong decisions</p><p>Calculation depth: {adaptive.current_ply} plies</p><p>Maximum evaluation loss: {(adaptive.max_eval_loss_cp / 100).toFixed(2)} pawns</p>{adaptiveReview && <p>Next review: +{adaptiveReview.next_interval_days} days</p>}{puzzle.source_url && <a href={puzzle.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>
+          !adaptive ? <p className="muted">Starting adaptive drill…</p> : adaptiveActive ? <div className="adaptive-live"><p className="muted">{submitting ? 'Checking the continuation…' : hinting ? 'Finding the next best move…' : lastAdaptiveMove?.accepted ? 'Strong. Continuing the line…' : lastAdaptiveMove?.accepted === false ? 'Not quite. Try again — the position stays the same.' : 'Find the strongest move. Strong alternatives are accepted.'}</p>{lastAdaptiveMove?.engine_reply_san && <p>Engine replied <strong>{lastAdaptiveMove.engine_reply_san}</strong></p>}{hintShown && adaptiveHint && <p>Next best move: <strong>{adaptiveHint.move_san}</strong></p>}<p className="sequence-progress">{adaptive.user_moves_accepted} / up to {maxDecisions} decisions</p><button className="ghost" disabled={submitting || hinting || hintShown} onClick={() => { void showNextBestMove() }}>{hinting ? 'Finding move…' : hintShown ? 'Move shown' : 'Show next best move'}</button><button className="ghost" disabled={submitting || hinting} onClick={() => { void skip() }}>Skip</button></div> : <div className={outcomeClass}><h3>{adaptive.status === 'succeeded' ? 'Converted' : adaptive.status === 'failed' ? 'Continuation missed' : 'Drill ended'}</h3><p>{adaptive.user_moves_accepted}/{adaptive.user_moves_attempted} strong decisions</p><p>Calculation depth: {adaptive.current_ply} plies</p><p>Maximum evaluation loss: {(adaptive.max_eval_loss_cp / 100).toFixed(2)} pawns</p>{adaptiveReview && <p>Next review: +{adaptiveReview.next_interval_days} days</p>}{puzzle.source_url && <a href={puzzle.source_url} target="_blank" rel="noreferrer">Open source game ↗</a>}<button className="ghost" disabled={explaining} onClick={() => { void explainBestMove() }}>{explaining ? 'Analyzing why…' : 'Why is this best?'}</button>{explanationError && <ErrorBox message={explanationError} />}{explanation && <ExplanationView explanation={explanation} />}<button onClick={() => { void load() }}>Next puzzle</button></div>
         )}
       </div>
     </div>
@@ -284,10 +329,10 @@ function PracticePage() {
 }
 
 function appendAdaptiveSteps(steps: AdaptiveSafeStep[], result: AdaptiveMoveResult): AdaptiveSafeStep[] {
-  const next = [...steps]
+  const next = steps.filter((step) => step.accepted)
   let stepIndex = next.reduce((highest, step) => Math.max(highest, step.step_index), -1) + 1
-  if (result.move_uci && result.move_san) {
-    next.push({ step_index: stepIndex, side: 'user', move_uci: result.move_uci, move_san: result.move_san, accepted: result.accepted === true })
+  if (result.accepted === true && result.move_uci && result.move_san) {
+    next.push({ step_index: stepIndex, side: 'user', move_uci: result.move_uci, move_san: result.move_san, accepted: true })
     stepIndex += 1
   }
   if (result.engine_reply_uci && result.engine_reply_san) {
@@ -297,7 +342,8 @@ function appendAdaptiveSteps(steps: AdaptiveSafeStep[], result: AdaptiveMoveResu
 }
 
 function AdaptiveLine({ steps }: { steps: AdaptiveSafeStep[] }) {
-  return <div className="adaptive-line"><strong>Line so far</strong><ol>{steps.map((step, index) => <li className={step.accepted ? '' : 'missed'} key={step.step_index}>{step.side === 'user' ? `${Math.floor(index / 2) + 1}. ${step.move_san}` : `… ${step.move_san}`}</li>)}</ol></div>
+  const accepted = steps.filter((step) => step.accepted)
+  return <div className="adaptive-line"><strong>Line so far</strong><ol>{accepted.map((step, index) => <li key={step.step_index}>{step.side === 'user' ? `${Math.floor(index / 2) + 1}. ${step.move_san}` : `… ${step.move_san}`}</li>)}</ol></div>
 }
 
 function ExplanationView({ explanation }: { explanation: Explanation }) {
