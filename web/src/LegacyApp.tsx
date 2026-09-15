@@ -115,6 +115,20 @@ function fenAfterUciMove(fen: string, moveUci: string): string | null {
   }
 }
 
+// react-chessboard animates castling as a two-phase, uncancelled setTimeout
+// (king first, rook ~animationDurationInMs later). If we swap the preview
+// position back out before that timer fires, it overwrites the revert with
+// the castled position. Only castling needs the extra settle delay below.
+function isCastleUciMove(fen: string, moveUci: string): boolean {
+  try {
+    const board = new Chess(fen)
+    const played = board.move({ from: moveUci.slice(0, 2), to: moveUci.slice(2, 4), promotion: moveUci.length === 5 ? moveUci[4] : undefined })
+    return played != null && (played.flags.includes('k') || played.flags.includes('q'))
+  } catch {
+    return false
+  }
+}
+
 function buildAdaptiveHistory(startFen: string, steps: AdaptiveSafeStep[]): AdaptiveHistoryEntry[] {
   const history: AdaptiveHistoryEntry[] = [{ fen: startFen, step: null }]
   let board: Chess
@@ -225,13 +239,14 @@ function PracticePage() {
           setAdaptive(session)
         }
         const previewFen = fenAfterUciMove(session.current_fen, moveUci)
+        const isCastle = previewFen ? isCastleUciMove(session.current_fen, moveUci) : false
         const replyDelay = previewFen ? wait(ADAPTIVE_ENGINE_REPLY_DELAY_MS) : null
         if (previewFen) {
           setPendingAdaptiveFen(previewFen)
         }
         setLastAdaptiveMove(null)
         const result = await api.adaptiveMove(session.session_id, moveUci)
-        if (result.accepted === true && result.engine_reply_uci && replyDelay) {
+        if (replyDelay && (result.accepted === true ? result.engine_reply_uci : isCastle)) {
           await replyDelay
         }
         setLastAdaptiveMove(result)
