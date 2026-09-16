@@ -1,6 +1,17 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal, cast
+
+
+PersistenceMode = Literal["local", "hosted"]
+
+
+def _persistence_mode(value: str) -> PersistenceMode:
+    normalized = value.strip().lower()
+    if normalized not in {"local", "hosted"}:
+        raise ValueError("Persistence mode must be 'local' or 'hosted'")
+    return cast(PersistenceMode, normalized)
 
 
 @dataclass(frozen=True)
@@ -24,6 +35,16 @@ class Settings:
     stockfish_depth: int = 14
     min_group_size: int = 10
     thresholds: MoveQualityThresholds = field(default_factory=MoveQualityThresholds)
+    persistence_mode: PersistenceMode = "local"
+    database_url: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.persistence_mode == "hosted" and not self.database_url:
+            raise ValueError("DATABASE_URL is required in hosted persistence mode")
+
+    @property
+    def is_hosted(self) -> bool:
+        return self.persistence_mode == "hosted"
 
 
 def get_settings(
@@ -37,6 +58,8 @@ def get_settings(
     inaccuracy_cpl: int | None = None,
     mistake_cpl: int | None = None,
     blunder_cpl: int | None = None,
+    persistence_mode: PersistenceMode | None = None,
+    database_url: str | None = None,
 ) -> Settings:
     thresholds = MoveQualityThresholds(
         inaccuracy=(
@@ -73,4 +96,12 @@ def get_settings(
             else int(os.getenv("CHESS_COACH_MIN_GROUP_SIZE", "10"))
         ),
         thresholds=thresholds,
+        persistence_mode=(
+            persistence_mode
+            if persistence_mode is not None
+            else _persistence_mode(os.getenv("CHESS_COACH_PERSISTENCE_MODE", "local"))
+        ),
+        database_url=(
+            database_url if database_url is not None else os.getenv("DATABASE_URL") or None
+        ),
     )
