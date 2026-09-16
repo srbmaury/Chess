@@ -89,11 +89,14 @@ Start the application:
 chess-coach ui
 ```
 
-It binds to `127.0.0.1:8000` by default and opens the browser. To avoid opening a browser automatically:
+It binds to `127.0.0.1:8000` by default and opens the browser. To avoid opening a browser automatically, or to bind elsewhere:
 
 ```bash
 chess-coach ui --no-open
+chess-coach ui --host 0.0.0.0 --port 8080
 ```
+
+See the [local-only privacy model](#local-only-privacy-model) before binding to a non-localhost `--host`.
 
 The web UI contains:
 
@@ -252,7 +255,7 @@ chess-coach analyze \
   --depth 14
 ```
 
-Depth 14 is the default. Analysis is resumable, reports reused vs newly analyzed moves, and uses a single-writer guard for each profile's analysis cache.
+Depth 14 is the default. Analysis is resumable, reports reused vs newly analyzed moves, and uses a single-writer guard for each profile's analysis cache. If the app quits unexpectedly (crash, force-quit) while analysis was running, the next `analyze` run automatically detects and clears that stale lock instead of requiring manual cleanup.
 
 ### 3. Build features
 
@@ -263,6 +266,12 @@ chess-coach features
 Features include position complexity, material, pawn structure, king-safety proxies, opening metadata, phase, rating difference, time-control category, and the pre-move engine evaluation.
 
 Post-move engine evaluation, centipawn loss, and final game result are excluded from predictive features to avoid target leakage.
+
+`features` accepts the same `--inaccuracy-cpl`, `--mistake-cpl`, and `--blunder-cpl` overrides as `analyze`, letting you reclassify move quality from already-analyzed positions without rerunning Stockfish:
+
+```bash
+chess-coach features --inaccuracy-cpl 40 --mistake-cpl 90 --blunder-cpl 180
+```
 
 ### 4. Train the personalized model
 
@@ -284,7 +293,13 @@ The default significant-mistake target is CPL >= 100. Games are split chronologi
 chess-coach report
 ```
 
-The report highlights recurring weak contexts by color, opening, phase, time control, and model-derived risk signals, with sample-size guards for grouped statistics.
+The report highlights recurring weak contexts by color, opening, phase, time control, and model-derived risk signals, with sample-size guards for grouped statistics. Raise or lower the minimum sample size a grouped statistic needs before it's reported:
+
+```bash
+chess-coach report --min-group-size 15
+```
+
+The web UI's Dashboard page opens the generated report in a new browser tab when you click the **report** artifact.
 
 ## Personal puzzle training
 

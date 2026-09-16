@@ -165,7 +165,12 @@ function DashboardPage() {
   useEffect(() => { api.dashboard().then(setData).catch((x: Error) => setError(x.message)) }, [])
   if (error) return <ErrorBox message={error} />
   if (!data) return <p className="muted">Loading dashboard…</p>
-  return <section><Heading kicker="TODAY" title="Your training cockpit" copy="Use your own mistakes as the next study plan." action={<NavLink className="button" to="/practice">Start practice</NavLink>} /><div className="metrics"><Metric label="Due puzzles" value={data.training.due_puzzles} /><Metric label="Mastered" value={data.training.mastered_puzzles} /><Metric label="Review accuracy" value={percentage(data.training.accuracy)} /><Metric label="Analyzed moves" value={data.analyzed_moves.toLocaleString()} /></div><div className="panel"><h2>Pipeline readiness</h2><div className="artifacts">{Object.entries(data.artifacts).map(([key, value]) => <div className="artifact" key={key}><i className={value.exists ? 'ready' : ''} /><span><strong>{key}</strong><small>{value.exists ? 'Ready' : 'Not built yet'}</small></span></div>)}</div></div></section>
+  return <section><Heading kicker="TODAY" title="Your training cockpit" copy="Use your own mistakes as the next study plan." action={<NavLink className="button" to="/practice">Start practice</NavLink>} /><div className="metrics"><Metric label="Due puzzles" value={data.training.due_puzzles} /><Metric label="Mastered" value={data.training.mastered_puzzles} /><Metric label="Review accuracy" value={percentage(data.training.accuracy)} /><Metric label="Analyzed moves" value={data.analyzed_moves.toLocaleString()} /></div><div className="panel"><h2>Pipeline readiness</h2><div className="artifacts">{Object.entries(data.artifacts).map(([key, value]) => {
+    const content = <><i className={value.exists ? 'ready' : ''} /><span><strong>{key}</strong><small>{value.exists ? 'Ready' : 'Not built yet'}</small></span></>
+    return key === 'report' && value.exists
+      ? <a className="artifact" key={key} href="/api/report" target="_blank" rel="noopener noreferrer">{content}</a>
+      : <div className="artifact" key={key}>{content}</div>
+  })}</div></div></section>
 }
 
 function PracticePage() {
@@ -492,6 +497,7 @@ function PipelinePage() {
   const [depth, setDepth] = useState(14)
   const [error, setError] = useState('')
   const [streamGeneration, setStreamGeneration] = useState(0)
+  const reportWindowRef = useRef<Window | null>(null)
   const refresh = useCallback(() => api.pipelineStatus().then(setStatus).catch((x: Error) => setError(x.message)), [])
   useEffect(() => {
     refresh()
@@ -499,6 +505,20 @@ function PipelinePage() {
     stream.onmessage = (event) => {
       const progress = JSON.parse(event.data)
       setStatus((old) => ({ ...old, ...progress, progress }))
+      if (progress.stage === 'report' && reportWindowRef.current && !reportWindowRef.current.closed) {
+        if (progress.status === 'succeeded') {
+          reportWindowRef.current.location.href = '/api/report'
+          reportWindowRef.current = null
+        } else if (progress.status === 'failed') {
+          reportWindowRef.current.document.body.textContent = progress.error
+            ? `Report generation failed: ${progress.error}`
+            : 'Report generation failed.'
+          reportWindowRef.current = null
+        } else if (progress.status === 'cancelled') {
+          reportWindowRef.current.close()
+          reportWindowRef.current = null
+        }
+      }
       if (['succeeded', 'failed', 'cancelled'].includes(progress.status)) {
         stream.close()
       }
@@ -509,11 +529,24 @@ function PipelinePage() {
   async function start(stage: string) {
     try {
       setError('')
+      if (stage === 'report') {
+        // Open the tab synchronously, inside the click handler, so browsers
+        // don't treat it as a popup: it's filled in once the (async) report
+        // job reports success via the event stream below.
+        const opened = window.open('about:blank', '_blank')
+        if (opened) {
+          opened.document.title = 'Coaching report'
+          opened.document.body.textContent = 'Generating report…'
+        }
+        reportWindowRef.current = opened
+      }
       setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined))
       setStreamGeneration((value) => value + 1)
       window.setTimeout(refresh, 250)
     } catch (x) {
       setError((x as Error).message)
+      reportWindowRef.current?.close()
+      reportWindowRef.current = null
     }
   }
 
