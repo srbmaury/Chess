@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -188,7 +189,9 @@ def test_delete_profile_refuses_while_analysis_is_running(tmp_path: Path):
     lock = alice.profile_lock_path
     assert lock is not None
     lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("12345", encoding="utf-8")
+    # Simulate a lock genuinely held by a live process (this test process
+    # itself) so the stale-lock reclaim logic doesn't clear it away.
+    lock.write_text(str(os.getpid()), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="analysis is running"):
         manager.delete_profile("alice")

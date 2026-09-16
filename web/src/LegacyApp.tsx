@@ -165,7 +165,12 @@ function DashboardPage() {
   useEffect(() => { api.dashboard().then(setData).catch((x: Error) => setError(x.message)) }, [])
   if (error) return <ErrorBox message={error} />
   if (!data) return <p className="muted">Loading dashboard…</p>
-  return <section><Heading kicker="TODAY" title="Your training cockpit" copy="Use your own mistakes as the next study plan." action={<NavLink className="button" to="/practice">Start practice</NavLink>} /><div className="metrics"><Metric label="Due puzzles" value={data.training.due_puzzles} /><Metric label="Mastered" value={data.training.mastered_puzzles} /><Metric label="Review accuracy" value={percentage(data.training.accuracy)} /><Metric label="Analyzed moves" value={data.analyzed_moves.toLocaleString()} /></div><div className="panel"><h2>Pipeline readiness</h2><div className="artifacts">{Object.entries(data.artifacts).map(([key, value]) => <div className="artifact" key={key}><i className={value.exists ? 'ready' : ''} /><span><strong>{key}</strong><small>{value.exists ? 'Ready' : 'Not built yet'}</small></span></div>)}</div></div></section>
+  return <section><Heading kicker="TODAY" title="Your training cockpit" copy="Use your own mistakes as the next study plan." action={<NavLink className="button" to="/practice">Start practice</NavLink>} /><div className="metrics"><Metric label="Due puzzles" value={data.training.due_puzzles} /><Metric label="Mastered" value={data.training.mastered_puzzles} /><Metric label="Review accuracy" value={percentage(data.training.accuracy)} /><Metric label="Analyzed moves" value={data.analyzed_moves.toLocaleString()} /></div><div className="panel"><h2>Pipeline readiness</h2><div className="artifacts">{Object.entries(data.artifacts).map(([key, value]) => {
+    const content = <><i className={value.exists ? 'ready' : ''} /><span><strong>{key}</strong><small>{value.exists ? 'Ready' : 'Not built yet'}</small></span></>
+    return key === 'report' && value.exists
+      ? <a className="artifact" key={key} href="/api/report" target="_blank" rel="noopener noreferrer">{content}</a>
+      : <div className="artifact" key={key}>{content}</div>
+  })}</div></div></section>
 }
 
 function PracticePage() {

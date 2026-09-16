@@ -214,3 +214,23 @@ def test_dashboard_works_before_puzzle_bank_exists(tmp_path: Path):
     assert payload["training"]["total_puzzles"] == 0
     assert payload["training"]["due_puzzles"] == 0
     assert payload["artifacts"]["analysis"]["exists"] is False
+
+
+def test_report_returns_404_before_it_has_been_built(tmp_path: Path):
+    response = _client(tmp_path).get("/api/report")
+
+    assert response.status_code == 404
+    assert "Run the Report stage" in response.json()["detail"]
+
+
+def test_report_serves_the_generated_markdown(tmp_path: Path):
+    settings = _settings(tmp_path)
+    report_path = settings.data_dir / "processed" / "coaching_report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("# Coaching report\n\nYou blunder rooks.", encoding="utf-8")
+
+    response = _client(tmp_path).get("/api/report")
+
+    assert response.status_code == 200
+    assert response.text == "# Coaching report\n\nYou blunder rooks."
+    assert response.headers["content-type"].startswith("text/markdown")

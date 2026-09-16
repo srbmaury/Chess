@@ -1,4 +1,5 @@
 import json
+import os
 from hashlib import sha256
 from pathlib import Path
 
@@ -174,7 +175,9 @@ def test_analysis_refuses_second_writer_when_lock_exists(tmp_path: Path):
     moves = _single_user_move()
     output = tmp_path / "analysis.parquet"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.with_suffix(".lock").write_text("12345", encoding="utf-8")
+    # Simulate a lock genuinely held by a live process (this test process
+    # itself) so the stale-lock reclaim logic doesn't clear it away.
+    output.with_suffix(".lock").write_text(str(os.getpid()), encoding="utf-8")
     settings = Settings(data_dir=tmp_path / "data", model_dir=tmp_path / "models")
 
     with pytest.raises(EngineConfigurationError, match="already running"):

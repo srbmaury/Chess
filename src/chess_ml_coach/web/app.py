@@ -11,7 +11,7 @@ import chess
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
@@ -161,12 +161,15 @@ def create_app(
             model_dir=str(active.model_dir),
         )
 
+    def _report_path(settings: Settings) -> Path:
+        return settings.data_dir / "processed" / "coaching_report.md"
+
     @app.get("/api/dashboard", response_model=DashboardResponse)
     def dashboard() -> DashboardResponse:
         active = current()
         analysis_path = active.data_dir / "engine" / "analysis.parquet"
         features_path = active.data_dir / "processed" / "features.parquet"
-        report_path = active.data_dir / "processed" / "coaching_report.md"
+        report_path = _report_path(active)
         db_path = training_db_path(active)
         model_path = active.model_dir / "mistake_model.joblib"
         analysis_state = _artifact_state(analysis_path, parquet_rows=True)
@@ -180,6 +183,19 @@ def create_app(
                 "puzzles": _artifact_state(db_path),
                 "model": _artifact_state(model_path),
             },
+        )
+
+    @app.get("/api/report")
+    def report() -> PlainTextResponse:
+        report_path = _report_path(current())
+        if not report_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Report not found. Run the Report stage from the Pipeline page.",
+            )
+        return PlainTextResponse(
+            report_path.read_text(encoding="utf-8"),
+            media_type="text/markdown; charset=utf-8",
         )
 
     @app.get("/api/practice/next", response_model=PracticeNextResponse)
