@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -213,5 +211,3 @@ BEGIN
     END LOOP;
 END;
 $$;
-
-COMMIT;
