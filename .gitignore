@@ -10,8 +10,10 @@ venv/
 .env.*
 data/
 models/
+backups/
 *.egg-info/
 dist/
 build/
 web/node_modules/
 web/dist/
+web/*.tsbuildinfo

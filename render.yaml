@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: chess-ml-coach
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      - key: CHESS_COACH_USERNAME
+        value: srbmaury
+      - key: CHESS_COACH_STOCKFISH_DEPTH
+        value: "14"
