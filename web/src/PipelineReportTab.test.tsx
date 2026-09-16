@@ -74,7 +74,7 @@ test('clicking Run for report opens a tab synchronously and fills it in on succe
   // The tab must be opened synchronously inside the click handler, before
   // any async work, or browsers treat it as a blocked popup.
   expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank')
-  expect(win.document.body.textContent).toBe('Generating report…')
+  expect(win.document.body.textContent).toContain('Generating report…')
   expect(win.location.href).toBe('')
 
   emit(getSource(), { stage: 'report', status: 'succeeded', report_file: '/tmp/coaching_report.md' })
@@ -98,4 +98,18 @@ test('a failed report run shows the error in the opened tab instead of the repor
 
   expect(win.location.href).toBe('')
   expect(win.document.body.textContent).toBe('Report generation failed: Puzzle bank not found.')
+})
+
+test('a blocked popup surfaces an error instead of failing silently', async () => {
+  window.history.pushState({}, '', '/pipeline')
+  installPipeline({ status: 'idle', stage: null, username: 'srbmaury' })
+  vi.spyOn(window, 'open').mockReturnValue(null)
+
+  render(<App />)
+  expect(await screen.findByText('Build your coach')).toBeTruthy()
+
+  const reportStage = screen.getByText('Report').closest('article')!
+  fireEvent.click(within(reportStage).getByRole('button', { name: 'Run' }))
+
+  expect(await screen.findByText(/blocked the report tab/)).toBeTruthy()
 })

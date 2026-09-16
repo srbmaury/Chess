@@ -536,7 +536,9 @@ function PipelinePage() {
         const opened = window.open('about:blank', '_blank')
         if (opened) {
           opened.document.title = 'Coaching report'
-          opened.document.body.textContent = 'Generating report…'
+          opened.document.body.textContent = 'Generating report… this can take up to a minute for a large game history. This tab will update automatically.'
+        } else {
+          setError('Your browser blocked the report tab. Allow pop-ups for this site, then click Run again.')
         }
         reportWindowRef.current = opened
       }
