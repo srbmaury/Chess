@@ -497,6 +497,7 @@ function PipelinePage() {
   const [depth, setDepth] = useState(14)
   const [error, setError] = useState('')
   const [streamGeneration, setStreamGeneration] = useState(0)
+  const reportWindowRef = useRef<Window | null>(null)
   const refresh = useCallback(() => api.pipelineStatus().then(setStatus).catch((x: Error) => setError(x.message)), [])
   useEffect(() => {
     refresh()
@@ -504,6 +505,20 @@ function PipelinePage() {
     stream.onmessage = (event) => {
       const progress = JSON.parse(event.data)
       setStatus((old) => ({ ...old, ...progress, progress }))
+      if (progress.stage === 'report' && reportWindowRef.current && !reportWindowRef.current.closed) {
+        if (progress.status === 'succeeded') {
+          reportWindowRef.current.location.href = '/api/report'
+          reportWindowRef.current = null
+        } else if (progress.status === 'failed') {
+          reportWindowRef.current.document.body.textContent = progress.error
+            ? `Report generation failed: ${progress.error}`
+            : 'Report generation failed.'
+          reportWindowRef.current = null
+        } else if (progress.status === 'cancelled') {
+          reportWindowRef.current.close()
+          reportWindowRef.current = null
+        }
+      }
       if (['succeeded', 'failed', 'cancelled'].includes(progress.status)) {
         stream.close()
       }
@@ -514,11 +529,24 @@ function PipelinePage() {
   async function start(stage: string) {
     try {
       setError('')
+      if (stage === 'report') {
+        // Open the tab synchronously, inside the click handler, so browsers
+        // don't treat it as a popup: it's filled in once the (async) report
+        // job reports success via the event stream below.
+        const opened = window.open('about:blank', '_blank')
+        if (opened) {
+          opened.document.title = 'Coaching report'
+          opened.document.body.textContent = 'Generating report…'
+        }
+        reportWindowRef.current = opened
+      }
       setStatus(await api.startPipeline(stage, stage === 'analyze' ? { depth } : undefined))
       setStreamGeneration((value) => value + 1)
       window.setTimeout(refresh, 250)
     } catch (x) {
       setError((x as Error).message)
+      reportWindowRef.current?.close()
+      reportWindowRef.current = null
     }
   }
 
