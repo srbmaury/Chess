@@ -171,11 +171,83 @@ def _best_move_facts(board: chess.Board, puzzle: StoredPuzzle) -> tuple[str, str
     )
 
 
-def _why_original_move_was_worse(puzzle: StoredPuzzle) -> str:
+_PIECE_NAMES = {
+    chess.PAWN: "pawn",
+    chess.KNIGHT: "knight",
+    chess.BISHOP: "bishop",
+    chess.ROOK: "rook",
+    chess.QUEEN: "queen",
+}
+_PIECE_VALUES = {
+    chess.PAWN: 1,
+    chess.KNIGHT: 3,
+    chess.BISHOP: 3,
+    chess.ROOK: 5,
+    chess.QUEEN: 9,
+}
+
+
+def _hanging_piece_note(board: chess.Board, move: chess.Move) -> str | None:
+    """Describe a move that leaves the piece it just moved completely
+    undefended and immediately capturable, e.g. a queen walking into an
+    open file/rank/diagonal. Only reports this unambiguous case - anything
+    needing a full exchange evaluation (the piece is defended, but not
+    enough) is left to the generic pawns-lost message instead.
+    """
+    if move not in board.legal_moves:
+        return None
+    mover_color = board.turn
+    after = board.copy(stack=False)
+    after.push(move)
+    dest = move.to_square
+    piece = after.piece_at(dest)
+    if piece is None or piece.piece_type == chess.KING:
+        return None
+    if after.attackers(mover_color, dest):
+        return None  # defended - not a clean "hangs for free" case.
+    attackers = sorted(
+        after.attackers(not mover_color, dest),
+        key=lambda square: _PIECE_VALUES.get(after.piece_at(square).piece_type, 0),
+    )
+    piece_name = _PIECE_NAMES.get(piece.piece_type, "piece")
+    square_name = chess.square_name(dest)
+    for attacker_square in attackers:
+        attacker = after.piece_at(attacker_square)
+        promotion = (
+            chess.QUEEN
+            if attacker.piece_type == chess.PAWN and chess.square_rank(dest) in (0, 7)
+            else None
+        )
+        capture = chess.Move(attacker_square, dest, promotion=promotion)
+        if capture in after.legal_moves:
+            capture_san = after.san(capture)
+            return (
+                f"leaves the {piece_name} on {square_name} completely undefended - "
+                f"{capture_san} simply wins it for free"
+            )
+    return None
+
+
+def _why_original_move_was_worse(board: chess.Board, puzzle: StoredPuzzle) -> str:
+    hanging_note = None
+    try:
+        your_move = chess.Move.from_uci(puzzle.your_move_uci)
+    except ValueError:
+        your_move = None
+    if your_move is not None:
+        hanging_note = _hanging_piece_note(board, your_move)
+
     if puzzle.eval_loss_pawns >= 50:
+        if hanging_note:
+            return f"Your game move {puzzle.your_move_san} {hanging_note}, causing a decisive, mate-level evaluation swing."
         return (
             f"Your game move {puzzle.your_move_san} missed this continuation and caused "
             "a decisive, mate-level evaluation swing."
+        )
+    if hanging_note:
+        return (
+            f"Your game move {puzzle.your_move_san} {hanging_note}, losing about "
+            f"{puzzle.eval_loss_pawns:.2f} pawns of evaluation compared with the best move."
         )
     return (
         f"Your game move {puzzle.your_move_san} missed this continuation and lost about "
@@ -242,7 +314,7 @@ class PuzzleExplanationService:
 
         board = chess.Board(puzzle.fen_before)
         idea, board_reason = _best_move_facts(board, puzzle)
-        why_worse = _why_original_move_was_worse(puzzle)
+        why_worse = _why_original_move_was_worse(board, puzzle)
         try:
             info = self._analyse(board.copy(stack=False), depth)
             pv = list(info.get("pv") or [])

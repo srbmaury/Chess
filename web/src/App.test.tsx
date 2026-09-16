@@ -166,7 +166,7 @@ test('reveals why the best move is best only after a practice attempt', async ()
   fireEvent.click(whyButton)
 
   expect(await screen.findByText('Forcing check')).toBeTruthy()
-  expect(await screen.findByText('d4 d5 Nc3')).toBeTruthy()
+  expect(await screen.findByText('1.d4 d5 2.Nc3')).toBeTruthy()
   expect(await screen.findByText(/lost 2.50 pawns/)).toBeTruthy()
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/explanation'))).toBe(true)
 })
