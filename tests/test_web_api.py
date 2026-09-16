@@ -223,14 +223,21 @@ def test_report_returns_404_before_it_has_been_built(tmp_path: Path):
     assert "Run the Report stage" in response.json()["detail"]
 
 
-def test_report_serves_the_generated_markdown(tmp_path: Path):
+def test_report_renders_the_generated_markdown_as_html(tmp_path: Path):
     settings = _settings(tmp_path)
     report_path = settings.data_dir / "processed" / "coaching_report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text("# Coaching report\n\nYou blunder rooks.", encoding="utf-8")
+    report_path.write_text(
+        "# Coaching report\n\nYou **blunder** rooks.\n\n"
+        "| Color | Blunder rate |\n| --- | --- |\n| white | 7.1% |\n",
+        encoding="utf-8",
+    )
 
     response = _client(tmp_path).get("/api/report")
 
     assert response.status_code == 200
-    assert response.text == "# Coaching report\n\nYou blunder rooks."
-    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<h1>Coaching report</h1>" in response.text
+    assert "<strong>blunder</strong>" in response.text
+    assert "<table>" in response.text
+    assert "<td>white</td>" in response.text
