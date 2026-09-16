@@ -15,6 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CHESS_COACH_DATA_DIR=/app/runtime/data \
     CHESS_COACH_MODEL_DIR=/app/runtime/models \
+    CHESS_COACH_FRONTEND_DIST=/app/web/dist \
     STOCKFISH_PATH=/usr/games/stockfish
 
 RUN apt-get update \

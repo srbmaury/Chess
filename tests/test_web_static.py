@@ -7,9 +7,18 @@ from typer.testing import CliRunner
 
 from chess_ml_coach.cli import app
 from chess_ml_coach.config import Settings
-from chess_ml_coach.web.serve import create_served_app
+from chess_ml_coach.web.serve import create_served_app, default_frontend_dist
 
 runner = CliRunner()
+
+
+def test_default_frontend_dist_honors_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    dist = tmp_path / "deployed-web-dist"
+    monkeypatch.setenv("CHESS_COACH_FRONTEND_DIST", str(dist))
+
+    assert default_frontend_dist() == dist
 
 
 def test_served_app_returns_spa_and_keeps_unknown_api_as_404(tmp_path: Path):

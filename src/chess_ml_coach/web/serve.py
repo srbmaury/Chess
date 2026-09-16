@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -22,6 +23,9 @@ _BUILD_INPUTS = (
 
 
 def default_frontend_dist() -> Path:
+    configured = os.getenv("CHESS_COACH_FRONTEND_DIST")
+    if configured:
+        return Path(configured)
     return Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
