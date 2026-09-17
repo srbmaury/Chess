@@ -65,7 +65,7 @@ This is plan 1 of the approved delivery sequence. Later plans, written after thi
 - Produces: `get_settings(..., persistence_mode: PersistenceMode | None = None, database_url: str | None = None)`.
 - Consumes later: `Database.from_settings(settings: Settings)` from Task 2.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 ```python
 import pytest
@@ -112,13 +112,13 @@ def test_explicit_hosted_arguments_override_environment(monkeypatch: pytest.Monk
     assert settings.is_hosted is True
 ```
 
-- [ ] **Step 2: Run the tests and verify the expected failure**
+- [x] **Step 2: Run the tests and verify the expected failure**
 
 Run: `.venv/bin/pytest tests/test_hosted_config.py -q`
 
 Expected: FAIL because `Settings` has no persistence fields and hosted validation does not exist.
 
-- [ ] **Step 3: Implement minimal validated settings**
+- [x] **Step 3: Implement minimal validated settings**
 
 Add to `config.py`:
 
@@ -165,13 +165,13 @@ Do not merge this validation with `MoveQualityThresholds.__post_init__`; it belo
 
 Add the two keyword-only parameters to `get_settings()` with the exact types shown in the Interfaces block.
 
-- [ ] **Step 4: Run focused and regression tests**
+- [x] **Step 4: Run focused and regression tests**
 
 Run: `.venv/bin/pytest tests/test_hosted_config.py tests/test_cli.py tests/test_profiles.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/config.py tests/test_hosted_config.py
@@ -196,7 +196,7 @@ git commit -m "feat: add hosted persistence configuration"
 - Produces: `Database.is_ready() -> bool`
 - Produces: `DatabaseConfigurationError`.
 
-- [ ] **Step 1: Add dependencies and write failing lifecycle tests**
+- [x] **Step 1: Add dependencies and write failing lifecycle tests**
 
 Add these bounded dependencies to `pyproject.toml`:
 
@@ -263,19 +263,19 @@ def test_database_owns_pool_lifecycle_and_healthcheck():
     assert pool.closed is True
 ```
 
-- [ ] **Step 2: Verify tests fail for the missing module**
+- [x] **Step 2: Verify tests fail for the missing module**
 
 Run: `.venv/bin/pytest tests/test_hosted_database.py -q`
 
 Expected: FAIL with `ModuleNotFoundError: chess_ml_coach.hosted`.
 
-- [ ] **Step 3: Install the editable project dependencies**
+- [x] **Step 3: Install the editable project dependencies**
 
 Run: `.venv/bin/pip install -e '.[dev]'`
 
 Expected: psycopg and psycopg-pool install successfully.
 
-- [ ] **Step 4: Implement the database wrapper**
+- [x] **Step 4: Implement the database wrapper**
 
 Create `hosted/database.py` with this public shape:
 
@@ -334,7 +334,7 @@ class Database:
 
 Keep `hosted/__init__.py` empty except for a module docstring. Do not export a global pool.
 
-- [ ] **Step 5: Run focused tests and lint**
+- [x] **Step 5: Run focused tests and lint**
 
 Run: `.venv/bin/pytest tests/test_hosted_database.py tests/test_hosted_config.py -q`
 
@@ -342,7 +342,7 @@ Run: `.venv/bin/ruff check src/chess_ml_coach/hosted tests/test_hosted_database.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml src/chess_ml_coach/hosted tests/test_hosted_database.py
@@ -363,7 +363,7 @@ git commit -m "feat: add hosted database lifecycle"
 - Produces: active-job deduplication index `analysis_jobs_one_active_target`.
 - Produces: updated-at trigger function `set_updated_at()`.
 
-- [ ] **Step 1: Write a failing schema-contract test**
+- [x] **Step 1: Write a failing schema-contract test**
 
 ```python
 from importlib.resources import files
@@ -400,13 +400,13 @@ def test_initial_hosted_schema_contains_required_contracts():
     assert "UNIQUE (game_id, ply, analysis_config_id)" in sql
 ```
 
-- [ ] **Step 2: Verify the contract test fails**
+- [x] **Step 2: Verify the contract test fails**
 
 Run: `.venv/bin/pytest tests/test_hosted_schema.py -q`
 
 Expected: FAIL because the SQL resource does not exist.
 
-- [ ] **Step 3: Write the initial migration**
+- [x] **Step 3: Write the initial migration**
 
 Create one transactional migration containing these exact definitions (formatting may differ, names may not):
 
@@ -626,7 +626,7 @@ END;
 $$;
 ```
 
-- [ ] **Step 4: Run schema-contract and package-resource tests**
+- [x] **Step 4: Run schema-contract and package-resource tests**
 
 Run: `.venv/bin/pytest tests/test_hosted_schema.py -q`
 
@@ -638,7 +638,7 @@ Also run:
 
 Expected: test passes and command prints `True`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/hosted/sql/0001_hosted_schema.sql tests/test_hosted_schema.py
@@ -659,7 +659,7 @@ git commit -m "feat: define hosted database schema"
 - Produces: `discover_migrations() -> tuple[Migration, ...]`.
 - Produces: `apply_migrations(database: Database) -> tuple[str, ...]` returning versions newly applied.
 
-- [ ] **Step 1: Write failing discovery and idempotency tests**
+- [x] **Step 1: Write failing discovery and idempotency tests**
 
 Use a fake database/connection that records SQL and simulates applied versions:
 
@@ -715,13 +715,13 @@ def test_apply_migrations_is_idempotent():
 
 The second call adds exactly the `CREATE TABLE schema_migrations` and version query; it does not execute migration SQL or insert a version.
 
-- [ ] **Step 2: Verify tests fail for the missing runner**
+- [x] **Step 2: Verify tests fail for the missing runner**
 
 Run: `.venv/bin/pytest tests/test_hosted_migrations.py -q`
 
 Expected: FAIL with missing module or symbols.
 
-- [ ] **Step 3: Implement discovery and migration application**
+- [x] **Step 3: Implement discovery and migration application**
 
 ```python
 from __future__ import annotations
@@ -770,7 +770,7 @@ def apply_migrations(database: Database) -> tuple[str, ...]:
     return tuple(newly_applied)
 ```
 
-- [ ] **Step 4: Run focused tests and lint**
+- [x] **Step 4: Run focused tests and lint**
 
 Run: `.venv/bin/pytest tests/test_hosted_migrations.py tests/test_hosted_schema.py -q`
 
@@ -778,7 +778,7 @@ Run: `.venv/bin/ruff check src/chess_ml_coach/hosted tests/test_hosted_migration
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/hosted/migrations.py tests/test_hosted_migrations.py
@@ -798,7 +798,7 @@ git commit -m "feat: add hosted migration runner"
 - Consumes: `apply_migrations` from Task 4.
 - Produces: `chess-coach db-migrate --database-url <url>`.
 
-- [ ] **Step 1: Write failing CLI tests with injected seams**
+- [x] **Step 1: Write failing CLI tests with injected seams**
 
 Follow the existing CLI seam pattern (`_run_sync`, `_run_analyze`) and add module-level `_database_factory` and `_apply_migrations` aliases. Test without a real database:
 
@@ -842,13 +842,13 @@ def test_db_migrate_applies_and_closes(monkeypatch):
     assert database.closed is True
 ```
 
-- [ ] **Step 2: Verify the command tests fail**
+- [x] **Step 2: Verify the command tests fail**
 
 Run: `.venv/bin/pytest tests/test_cli_migrations.py -q`
 
 Expected: FAIL because `db-migrate` and its seams do not exist.
 
-- [ ] **Step 3: Implement the command**
+- [x] **Step 3: Implement the command**
 
 At module import level, alias:
 
@@ -891,7 +891,7 @@ def db_migrate(
 
 Import `os`; `replace` is not needed. Use the existing `_get_root_settings` alias so the command does not create a filesystem player profile. Ensure error handling does not print the database URL.
 
-- [ ] **Step 4: Run CLI tests and help smoke tests**
+- [x] **Step 4: Run CLI tests and help smoke tests**
 
 Run: `.venv/bin/pytest tests/test_cli_migrations.py tests/test_cli.py -q`
 
@@ -899,7 +899,7 @@ Run: `.venv/bin/chess-coach --help`
 
 Expected: tests pass and help includes `db-migrate`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/cli.py tests/test_cli_migrations.py
@@ -923,7 +923,7 @@ git commit -m "feat: add hosted database migration command"
 - Local response: `persistence_mode="local"`, `database_ready=None`.
 - Hosted response: `persistence_mode="hosted"`, `database_ready=true|false`.
 
-- [ ] **Step 1: Write failing local and hosted health tests**
+- [x] **Step 1: Write failing local and hosted health tests**
 
 ```python
 from fastapi.testclient import TestClient
@@ -960,13 +960,13 @@ def test_hosted_health_reports_database_readiness(tmp_path):
     assert payload["database_ready"] is True
 ```
 
-- [ ] **Step 2: Verify health tests fail**
+- [x] **Step 2: Verify health tests fail**
 
 Run: `.venv/bin/pytest tests/test_hosted_health.py -q`
 
 Expected: FAIL because the response and dependency parameter do not exist.
 
-- [ ] **Step 3: Implement optional readiness without opening pools in local mode**
+- [x] **Step 3: Implement optional readiness without opening pools in local mode**
 
 Extend `HealthResponse` in `web/schemas.py`:
 
@@ -995,13 +995,13 @@ Do not expose `database_url`. Do not automatically run migrations during web sta
 
 Update `create_served_app` to accept and forward an optional database dependency. Pool construction and hosted repository integration remain for the authentication plan; this task only establishes the app seam and health contract.
 
-- [ ] **Step 4: Run web regressions**
+- [x] **Step 4: Run web regressions**
 
 Run: `.venv/bin/pytest tests/test_hosted_health.py tests/test_web_api.py tests/test_web_static.py tests/test_web_profiles.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/web/app.py src/chess_ml_coach/web/schemas.py src/chess_ml_coach/web/serve.py tests/test_hosted_health.py
@@ -1020,7 +1020,7 @@ git commit -m "feat: expose hosted persistence readiness"
 - Documents: `CHESS_COACH_PERSISTENCE_MODE`, `DATABASE_URL`, and `db-migrate`.
 - Documents: local mode is default and hosted mode is not activated by this phase.
 
-- [ ] **Step 1: Add the hosted persistence documentation**
+- [x] **Step 1: Add the hosted persistence documentation**
 
 Add a section containing these exact operational points:
 
@@ -1049,7 +1049,7 @@ the existing profile APIs to multi-user behavior.
 
 Use the displayed Markdown content exactly, including its inner shell code fences.
 
-- [ ] **Step 2: Run the complete verification suite**
+- [x] **Step 2: Run the complete verification suite**
 
 Run: `.venv/bin/ruff check src tests`
 
@@ -1061,7 +1061,7 @@ Run: `cd web && npm run build`
 
 Expected: all commands succeed. Existing deprecation warnings may remain; no new failures or warnings attributable to this phase are allowed.
 
-- [ ] **Step 3: Confirm local startup remains independent of PostgreSQL**
+- [x] **Step 3: Confirm local startup remains independent of PostgreSQL**
 
 Run:
 
@@ -1072,7 +1072,7 @@ env -u DATABASE_URL -u CHESS_COACH_PERSISTENCE_MODE \
 
 Expected: `local-ok`.
 
-- [ ] **Step 4: Review the final diff for secrets and unintended generated files**
+- [x] **Step 4: Review the final diff for secrets and unintended generated files**
 
 Run:
 
@@ -1084,7 +1084,7 @@ rg -n "postgresql://[^.].+@|service_role|stripe_secret" src tests README.md
 
 Expected: no real database URL or secret is present. Generated `.DS_Store`, caches, local data, models, and backups remain untracked/ignored and are not staged.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md
