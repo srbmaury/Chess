@@ -423,9 +423,35 @@ chess-coach db-migrate
 ```
 
 `db-migrate` applies ordered migrations and is safe to run repeatedly. Never commit
-`DATABASE_URL`; use deployment secrets. Hosted authentication and repositories are
-introduced in subsequent phases, so setting hosted mode alone does not yet convert
-the existing profile APIs to multi-user behavior.
+`DATABASE_URL`; use deployment secrets. Setting hosted mode alone does not yet convert
+the existing profile APIs to multi-user behavior — profile claiming and entitlements
+are introduced in a later phase.
+
+### Hosted authentication
+
+Authenticated hosted endpoints live under `/api/hosted/` and require a Supabase
+session token. Configure the project's JWT secret alongside `DATABASE_URL`:
+
+```bash
+export SUPABASE_JWT_SECRET='your-project-jwt-secret'
+```
+
+This assumes the Supabase project uses the legacy shared HS256 JWT secret
+(Dashboard -> Authentication -> JWT Keys). A project on the newer
+asymmetric-only signing keys is not yet supported and needs a JWKS-based
+verifier instead.
+
+Smoke-test with a real session token:
+
+```bash
+curl -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  http://127.0.0.1:8000/api/hosted/account/me
+```
+
+An unset or invalid token returns `401`; a deployment without
+`SUPABASE_JWT_SECRET` configured returns `503`. No hosted product route
+depends on this endpoint yet — profile claiming and entitlements are
+introduced in the next phase.
 
 ## Local-only privacy model
 

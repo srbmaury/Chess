@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Settings
+from ..hosted.accounts import AccountRepository
 from ..hosted.database import Database
+from ..hosted.identity import SupabaseJwtVerifier
 from .app import create_app
 from .profile_routes import enable_profiles
 
@@ -63,6 +65,8 @@ def create_served_app(
     source_dir: Path | None = None,
     initial_username: str | None = None,
     database: Database | None = None,
+    jwt_verifier: SupabaseJwtVerifier | None = None,
+    account_repository: AccountRepository | None = None,
 ):
     dist = Path(static_dir) if static_dir is not None else default_frontend_dist()
     index_path = dist / "index.html"
@@ -78,7 +82,12 @@ def create_served_app(
         _verify_frontend_build(dist, source_root)
 
     resolved = settings or Settings()
-    app = create_app(resolved, database=database)
+    app = create_app(
+        resolved,
+        database=database,
+        jwt_verifier=jwt_verifier,
+        account_repository=account_repository,
+    )
     enable_profiles(app, resolved, initial_username=initial_username)
     assets = dist / "assets"
     if assets.exists():

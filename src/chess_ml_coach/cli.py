@@ -396,15 +396,38 @@ def ui(
 
     import uvicorn
 
+    from .hosted.accounts import PostgresAccountRepository
+    from .hosted.database import Database
+    from .hosted.identity import AuthConfigurationError, SupabaseJwtVerifier
     from .web.serve import create_served_app
 
     # UI starts from root storage so a fresh community clone can choose a player.
     root = _execute(
         lambda: _get_root_settings(None, data_dir=data_dir, model_dir=model_dir)
     )
-    web_app = _execute(
-        lambda: create_served_app(root, initial_username=username)
-    )
+
+    def _build_app():
+        database = Database.from_settings(root) if root.is_hosted else None
+        jwt_verifier = None
+        account_repository = None
+        if database is not None:
+            try:
+                jwt_verifier = SupabaseJwtVerifier.from_settings(root)
+            except AuthConfigurationError:
+                # Hosted DB may go live before SUPABASE_JWT_SECRET is configured;
+                # /api/hosted/* routes report 503 until it is set, rather than
+                # refusing to start the whole service.
+                jwt_verifier = None
+            account_repository = PostgresAccountRepository(database)
+        return create_served_app(
+            root,
+            initial_username=username,
+            database=database,
+            jwt_verifier=jwt_verifier,
+            account_repository=account_repository,
+        )
+
+    web_app = _execute(_build_app)
     url = f"http://{host}:{port}"
     typer.echo(f"Chess ML Coach UI -> {url}")
     if open_browser:
