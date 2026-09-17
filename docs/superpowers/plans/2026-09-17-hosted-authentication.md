@@ -60,7 +60,7 @@ This is plan 2 of the approved delivery sequence. Later plans, written after thi
 - Produces: `get_settings(..., supabase_jwt_secret: str | None = None, supabase_jwt_audience: str | None = None)`
 - Consumes later: nothing new; independent of `persistence_mode`/`is_hosted` so Phase 1's already-shipped hosted-without-auth behavior is not disturbed.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 ```python
 import pytest
@@ -91,13 +91,13 @@ def test_explicit_auth_arguments_override_environment(monkeypatch: pytest.Monkey
     assert settings.supabase_jwt_audience == "explicit-aud"
 ```
 
-- [ ] **Step 2: Run the tests and verify the expected failure**
+- [x] **Step 2: Run the tests and verify the expected failure**
 
 Run: `.venv/bin/pytest tests/test_hosted_auth_config.py -q`
 
 Expected: FAIL because `Settings` has no auth fields.
 
-- [ ] **Step 3: Implement the settings fields**
+- [x] **Step 3: Implement the settings fields**
 
 Extend `Settings` (no `__post_init__` validation — an unconfigured secret is a valid, common state; it is validated lazily where it is actually needed, in Task 2):
 
@@ -123,13 +123,13 @@ Populate them in `get_settings()` alongside the existing hosted fields:
 
 Add the two keyword-only parameters to `get_settings()` with the exact types shown in the Interfaces block.
 
-- [ ] **Step 4: Run focused and regression tests**
+- [x] **Step 4: Run focused and regression tests**
 
 Run: `.venv/bin/pytest tests/test_hosted_auth_config.py tests/test_hosted_config.py tests/test_cli.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/config.py tests/test_hosted_auth_config.py
@@ -152,7 +152,7 @@ git commit -m "feat: add supabase auth configuration"
 - Produces: `SupabaseJwtVerifier.from_settings(settings) -> SupabaseJwtVerifier`.
 - Produces: `SupabaseJwtVerifier.verify(token: str) -> VerifiedIdentity`.
 
-- [ ] **Step 1: Add the dependency and write failing verification tests**
+- [x] **Step 1: Add the dependency and write failing verification tests**
 
 Add to `pyproject.toml`:
 
@@ -243,19 +243,19 @@ def test_malformed_token_is_rejected():
         verifier.verify("not-a-jwt")
 ```
 
-- [ ] **Step 2: Verify tests fail for the missing module**
+- [x] **Step 2: Verify tests fail for the missing module**
 
 Run: `.venv/bin/pytest tests/test_hosted_identity.py -q`
 
 Expected: FAIL with `ModuleNotFoundError: chess_ml_coach.hosted.identity`.
 
-- [ ] **Step 3: Install the editable project dependencies**
+- [x] **Step 3: Install the editable project dependencies**
 
 Run: `.venv/bin/pip install -e '.[dev]'`
 
 Expected: `pyjwt` installs successfully.
 
-- [ ] **Step 4: Implement the verifier**
+- [x] **Step 4: Implement the verifier**
 
 ```python
 from __future__ import annotations
@@ -311,7 +311,7 @@ class SupabaseJwtVerifier:
 
 Keep this module free of FastAPI imports; it is a plain verification seam reusable by the CLI, the web layer, and tests alike.
 
-- [ ] **Step 5: Run focused tests and lint**
+- [x] **Step 5: Run focused tests and lint**
 
 Run: `.venv/bin/pytest tests/test_hosted_identity.py -q`
 
@@ -319,7 +319,7 @@ Run: `.venv/bin/ruff check src/chess_ml_coach/hosted tests/test_hosted_identity.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml src/chess_ml_coach/hosted/identity.py tests/test_hosted_identity.py
@@ -340,7 +340,7 @@ git commit -m "feat: add supabase jwt verifier"
 - Produces: `AccountRepository` Protocol with `upsert(self, *, account_id: str, email: str) -> Account`.
 - Produces: `PostgresAccountRepository(database: Database)` implementing it.
 
-- [ ] **Step 1: Write a failing upsert test against a fake connection**
+- [x] **Step 1: Write a failing upsert test against a fake connection**
 
 Follow the fake-connection pattern already established for `hosted/migrations.py` tests — no real database in unit tests:
 
@@ -408,13 +408,13 @@ def test_upsert_account_is_idempotent_for_the_same_subject():
     assert second.email == "new@example.com"
 ```
 
-- [ ] **Step 2: Verify tests fail for the missing module**
+- [x] **Step 2: Verify tests fail for the missing module**
 
 Run: `.venv/bin/pytest tests/test_hosted_accounts.py -q`
 
 Expected: FAIL with `ModuleNotFoundError: chess_ml_coach.hosted.accounts`.
 
-- [ ] **Step 3: Implement the repository**
+- [x] **Step 3: Implement the repository**
 
 ```python
 from __future__ import annotations
@@ -465,7 +465,7 @@ class PostgresAccountRepository:
 
 `account_id` is always the verified JWT subject (a Supabase Auth UUID), never a client-chosen value — `accounts.id` has no default generator in the Phase 1 schema for exactly this reason.
 
-- [ ] **Step 4: Run focused tests and lint**
+- [x] **Step 4: Run focused tests and lint**
 
 Run: `.venv/bin/pytest tests/test_hosted_accounts.py -q`
 
@@ -473,7 +473,7 @@ Run: `.venv/bin/ruff check src/chess_ml_coach/hosted tests/test_hosted_accounts.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/hosted/accounts.py tests/test_hosted_accounts.py
@@ -494,7 +494,7 @@ git commit -m "feat: add hosted account repository"
 
 Today `chess-coach ui` never passes a real `Database` into `create_served_app` — hosted health readiness and, from Task 5 onward, the account repository have nothing to talk to in an actual deployment. This task closes that gap before wiring auth into a live route.
 
-- [ ] **Step 1: Write a failing lifecycle test**
+- [x] **Step 1: Write a failing lifecycle test**
 
 ```python
 from fastapi.testclient import TestClient
@@ -544,13 +544,13 @@ def test_local_app_lifecycle_never_touches_a_database(tmp_path):
         assert client.get("/api/health").json()["database_ready"] is None
 ```
 
-- [ ] **Step 2: Verify the lifecycle test fails**
+- [x] **Step 2: Verify the lifecycle test fails**
 
 Run: `.venv/bin/pytest tests/test_hosted_app_lifecycle.py -q`
 
 Expected: FAIL — `database.opened` is still `False` because nothing calls it today.
 
-- [ ] **Step 3: Bind the pool to the FastAPI lifespan**
+- [x] **Step 3: Bind the pool to the FastAPI lifespan**
 
 In `create_app`, extend the existing `lifespan`:
 
@@ -569,13 +569,13 @@ In `create_app`, extend the existing `lifespan`:
 
 `database` is already a `create_app` parameter from the persistence foundation; only the lifespan body changes.
 
-- [ ] **Step 4: Run focused and regression tests**
+- [x] **Step 4: Run focused and regression tests**
 
 Run: `.venv/bin/pytest tests/test_hosted_app_lifecycle.py tests/test_hosted_health.py tests/test_web_api.py tests/test_web_static.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/web/app.py tests/test_hosted_app_lifecycle.py
@@ -598,7 +598,7 @@ git commit -m "feat: open hosted database pool for the app lifetime"
 - Produces: `require_account(request: Request) -> Account` FastAPI dependency.
 - Produces: `GET /api/hosted/account/me` — `200 {"id": ..., "email": ...}` for a valid token, `401` for a missing/invalid/expired token, `503` when hosted auth is not configured on this deployment.
 
-- [ ] **Step 1: Write failing dependency and endpoint tests**
+- [x] **Step 1: Write failing dependency and endpoint tests**
 
 ```python
 import time
@@ -708,13 +708,13 @@ def test_me_is_unavailable_when_hosted_auth_is_not_configured(tmp_path):
     assert response.status_code == 503
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+- [x] **Step 2: Verify the tests fail**
 
 Run: `.venv/bin/pytest tests/test_hosted_auth_dependency.py -q`
 
 Expected: FAIL — no `/api/hosted/account/me` route exists yet.
 
-- [ ] **Step 3: Implement the dependency and the route**
+- [x] **Step 3: Implement the dependency and the route**
 
 `web/auth.py`:
 
@@ -767,7 +767,7 @@ def whoami(account: Account = Depends(require_account)) -> dict[str, object]:
 
 In `web/app.py`, extend `create_app`'s signature with `jwt_verifier: SupabaseJwtVerifier | None = None, account_repository: AccountRepository | None = None`, store both on `app.state` next to `app.state.database`, and `app.include_router(hosted_router)` alongside the existing routers. Import `hosted_router` the same way `adaptive_router`/`explanation_router` are imported.
 
-- [ ] **Step 4: Run focused and full regression tests**
+- [x] **Step 4: Run focused and full regression tests**
 
 Run: `.venv/bin/pytest tests/test_hosted_auth_dependency.py tests/test_web_api.py tests/test_hosted_health.py -q`
 
@@ -775,7 +775,7 @@ Run: `.venv/bin/ruff check src/chess_ml_coach/web tests/test_hosted_auth_depende
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chess_ml_coach/web/auth.py src/chess_ml_coach/web/hosted_routes.py src/chess_ml_coach/web/app.py tests/test_hosted_auth_dependency.py
@@ -797,7 +797,7 @@ git commit -m "feat: add require_account dependency and whoami endpoint"
 - Extends: `create_served_app(..., jwt_verifier=None, account_repository=None)`, forwarded to `create_app`.
 - Documents: `SUPABASE_JWT_SECRET`, `SUPABASE_JWT_AUDIENCE`, and a `/api/hosted/account/me` smoke test.
 
-- [ ] **Step 1: Write a failing test that the served app forwards auth dependencies**
+- [x] **Step 1: Write a failing test that the served app forwards auth dependencies**
 
 ```python
 import time
@@ -852,13 +852,13 @@ def test_served_app_forwards_auth_dependencies_to_the_whoami_route(tmp_path):
     assert response.json()["id"] == "acct-1"
 ```
 
-- [ ] **Step 2: Verify the test fails**
+- [x] **Step 2: Verify the test fails**
 
 Run: `.venv/bin/pytest tests/test_hosted_serve_auth.py -q`
 
 Expected: FAIL — `create_served_app` does not accept `jwt_verifier`/`account_repository` yet.
 
-- [ ] **Step 3: Forward the dependencies and wire the CLI**
+- [x] **Step 3: Forward the dependencies and wire the CLI**
 
 In `web/serve.py`, add `jwt_verifier: SupabaseJwtVerifier | None = None, account_repository: AccountRepository | None = None` to `create_served_app` and pass them through to `create_app(resolved, database=database, jwt_verifier=jwt_verifier, account_repository=account_repository)`.
 
@@ -892,7 +892,7 @@ In `cli.py`'s `ui` command, construct real instances in hosted mode instead of a
 
 An unset `SUPABASE_JWT_SECRET` must not crash `chess-coach ui` in hosted mode — it should simply leave `/api/hosted/account/me` returning `503` until the secret is configured, exactly as Task 5's dependency already handles.
 
-- [ ] **Step 4: Add hosted authentication documentation**
+- [x] **Step 4: Add hosted authentication documentation**
 
 Append to the "Hosted persistence foundation" README section added in Phase 1:
 
@@ -924,7 +924,7 @@ depends on this endpoint yet — profile claiming and entitlements are
 introduced in the next phase.
 ~~~~
 
-- [ ] **Step 5: Run the complete verification suite**
+- [x] **Step 5: Run the complete verification suite**
 
 Run: `.venv/bin/ruff check src tests`
 
@@ -936,7 +936,7 @@ Run: `cd web && npm run build`
 
 Expected: all commands succeed with no new failures or warnings.
 
-- [ ] **Step 6: Confirm local startup remains independent of Supabase**
+- [x] **Step 6: Confirm local startup remains independent of Supabase**
 
 Run:
 
@@ -947,7 +947,7 @@ env -u DATABASE_URL -u CHESS_COACH_PERSISTENCE_MODE -u SUPABASE_JWT_SECRET \
 
 Expected: `local-ok`.
 
-- [ ] **Step 7: Review the final diff for secrets and unintended generated files**
+- [x] **Step 7: Review the final diff for secrets and unintended generated files**
 
 Run:
 
@@ -959,7 +959,7 @@ rg -n "postgresql://[^.].+@|service_role|stripe_secret|SUPABASE_JWT_SECRET=[^'\"
 
 Expected: no real secret is present — only placeholder connection strings/JWT secrets in tests and the README template.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/chess_ml_coach/web/serve.py src/chess_ml_coach/cli.py tests/test_hosted_serve_auth.py README.md
