@@ -184,17 +184,22 @@ def db_migrate(
     if not resolved_url:
         typer.echo("DATABASE_URL is required for db-migrate")
         raise typer.Exit(code=1)
-    hosted = _get_root_settings(
-        None,
-        persistence_mode="hosted",
-        database_url=resolved_url,
-    )
-    database = _database_factory(hosted)
-    database.open()
+    database = None
     try:
-        applied = _apply_migrations(database)
-    finally:
-        database.close()
+        hosted = _get_root_settings(
+            None,
+            persistence_mode="hosted",
+            database_url=resolved_url,
+        )
+        database = _database_factory(hosted)
+        try:
+            database.open()
+            applied = _apply_migrations(database)
+        finally:
+            database.close()
+    except Exception:  # noqa: BLE001 - never expose database connection details to the CLI.
+        typer.echo("Database migration failed", err=True)
+        raise typer.Exit(code=1) from None
     if applied:
         typer.echo(f"Applied migrations: {', '.join(applied)}")
     else:
