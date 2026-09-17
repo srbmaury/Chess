@@ -16,13 +16,16 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
+from ..hosted.accounts import AccountRepository
 from ..hosted.database import Database
+from ..hosted.identity import SupabaseJwtVerifier
 from ..move_quality import display_loss_pawns, stored_quality_reason
 from ..services import training_db_path
 from ..training import TrainingStore
 from .adaptive_routes import AdaptiveServiceRegistry
 from .adaptive_routes import router as adaptive_router
 from .explanation_routes import router as explanation_router
+from .hosted_routes import router as hosted_router
 from .pipeline import (
     TERMINAL_STATUSES,
     PipelineBusyError,
@@ -164,6 +167,8 @@ def create_app(
     pipeline_manager: PipelineManager | None = None,
     adaptive_services: AdaptiveServiceRegistry | None = None,
     database: Database | None = None,
+    jwt_verifier: SupabaseJwtVerifier | None = None,
+    account_repository: AccountRepository | None = None,
 ) -> FastAPI:
     initial = settings or Settings()
     manager = pipeline_manager or PipelineManager(initial)
@@ -185,6 +190,8 @@ def create_app(
     app.state.pipeline_manager = manager
     app.state.adaptive_services = adaptive
     app.state.database = database
+    app.state.jwt_verifier = jwt_verifier
+    app.state.account_repository = account_repository
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -194,6 +201,7 @@ def create_app(
     )
     app.include_router(explanation_router)
     app.include_router(adaptive_router)
+    app.include_router(hosted_router)
 
     def current() -> Settings:
         return app.state.settings
