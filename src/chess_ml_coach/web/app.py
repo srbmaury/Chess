@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from ..adaptive_store import AdaptiveSessionStore
 from ..config import Settings
+from ..hosted.database import Database
 from ..move_quality import display_loss_pawns, stored_quality_reason
 from ..services import training_db_path
 from ..training import TrainingStore
@@ -162,6 +163,7 @@ def create_app(
     *,
     pipeline_manager: PipelineManager | None = None,
     adaptive_services: AdaptiveServiceRegistry | None = None,
+    database: Database | None = None,
 ) -> FastAPI:
     initial = settings or Settings()
     manager = pipeline_manager or PipelineManager(initial)
@@ -178,6 +180,7 @@ def create_app(
     app.state.settings = initial
     app.state.pipeline_manager = manager
     app.state.adaptive_services = adaptive
+    app.state.database = database
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -194,11 +197,16 @@ def create_app(
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         active = current()
+        database_ready = None
+        if active.is_hosted:
+            database_ready = database is not None and database.is_ready()
         return HealthResponse(
             version=APP_VERSION,
             username=active.username,
             data_dir=str(active.data_dir),
             model_dir=str(active.model_dir),
+            persistence_mode=active.persistence_mode,
+            database_ready=database_ready,
         )
 
     def _report_path(settings: Settings) -> Path:

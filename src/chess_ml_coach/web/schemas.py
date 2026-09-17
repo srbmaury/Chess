@@ -11,6 +11,8 @@ class HealthResponse(BaseModel):
     username: str
     data_dir: str
     model_dir: str
+    persistence_mode: str
+    database_ready: bool | None
 
 
 class PracticePuzzle(BaseModel):
