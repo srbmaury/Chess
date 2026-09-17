@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
-
 PersistenceMode = Literal["local", "hosted"]
 
 

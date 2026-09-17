@@ -1,6 +1,6 @@
 import pytest
 
-from chess_ml_coach.config import Settings, get_settings
+from chess_ml_coach.config import get_settings
 
 
 def test_settings_default_to_local_without_database(monkeypatch: pytest.MonkeyPatch):
