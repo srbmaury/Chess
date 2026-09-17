@@ -406,6 +406,27 @@ Default CPL boundaries:
 | Mistake | `100–199` |
 | Blunder | `>= 200` |
 
+## Hosted persistence foundation
+
+Local filesystem persistence remains the default. It does not require Supabase:
+
+```bash
+chess-coach ui
+```
+
+Hosted persistence is opt-in and requires a PostgreSQL connection string from Supabase:
+
+```bash
+export CHESS_COACH_PERSISTENCE_MODE=hosted
+export DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/postgres'
+chess-coach db-migrate
+```
+
+`db-migrate` applies ordered migrations and is safe to run repeatedly. Never commit
+`DATABASE_URL`; use deployment secrets. Hosted authentication and repositories are
+introduced in subsequent phases, so setting hosted mode alone does not yet convert
+the existing profile APIs to multi-user behavior.
+
 ## Local-only privacy model
 
 Personal data, PGNs, engine analysis, puzzle/review history, explanation cache, trained models, frontend dependencies/build output, and `.env` files are excluded from Git.
