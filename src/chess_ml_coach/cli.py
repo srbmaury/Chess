@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, TypeVar
@@ -10,6 +11,8 @@ import typer
 from . import services
 from .config import Settings
 from .config import get_settings as _get_root_settings
+from .hosted.database import Database
+from .hosted.migrations import apply_migrations
 from .profiles import ProfileManager, canonicalize_username
 
 app = typer.Typer(no_args_is_help=True)
@@ -25,6 +28,8 @@ _run_report = services.run_report
 _run_puzzles = services.run_puzzles
 _training_db_path = services.training_db_path
 _answer_to_uci = services.answer_to_uci
+_database_factory = Database.from_settings
+_apply_migrations = apply_migrations
 
 
 def _resolve_profile_settings(username: str | None, **kwargs) -> Settings:
@@ -168,6 +173,32 @@ def _print_progress_rows(title: str, rows) -> None:
             f"  {row.label}: {row.puzzles} puzzles • {row.attempts} reviews • "
             f"{_accuracy_text(row.accuracy)} accuracy"
         )
+
+
+@app.command("db-migrate")
+def db_migrate(
+    database_url: Annotated[str | None, typer.Option("--database-url")] = None,
+) -> None:
+    """Apply pending hosted PostgreSQL migrations."""
+    resolved_url = database_url or os.getenv("DATABASE_URL")
+    if not resolved_url:
+        typer.echo("DATABASE_URL is required for db-migrate")
+        raise typer.Exit(code=1)
+    hosted = _get_root_settings(
+        None,
+        persistence_mode="hosted",
+        database_url=resolved_url,
+    )
+    database = _database_factory(hosted)
+    database.open()
+    try:
+        applied = _apply_migrations(database)
+    finally:
+        database.close()
+    if applied:
+        typer.echo(f"Applied migrations: {', '.join(applied)}")
+    else:
+        typer.echo("Database schema is already current")
 
 
 @app.command()
