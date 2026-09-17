@@ -171,10 +171,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        if database is not None:
+            database.open()
         try:
             yield
         finally:
             adaptive.close_all()
+            if database is not None:
+                database.close()
 
     app = FastAPI(title="Chess ML Coach", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = initial
